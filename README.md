@@ -15,10 +15,14 @@ Whether you're digitizing historical data from a scanned paper, scraping figures
 
 ## Installation & Execution
 
-Graphitizer aims to have a minimal installation footprint. It requires **Java Development Kit (JDK) 25** to build and run. It leverages Maven to compile the Java 25 binaries.
+Graphitizer provides a standalone, native Windows executable that requires **zero installation** or third-party dependencies!
 
-1. Ensure `JAVA_HOME` is bound to your JDK 25 directory, and that the path to Maven is exposed.
-2. Open a terminal and clone the repository.
+If you are on Windows, simply download the latest `Graphitizer_v1.exe` from the Releases page and double-click to run! The application includes its own integrated Java 25 runtime environment, so you do not even need Java installed on your computer.
+
+### Compiling from Source
+If you are running macOS or Linux, or wish to contribute to the engine, you can compile Graphitizer from source:
+1. Ensure `JAVA_HOME` is bound to your JDK 25 directory, and that Apache Maven is exposed on your system path.
+2. Clone the repository and navigate to the project root.
 3. Build and execute using this command:
 
 ```bash
@@ -26,11 +30,12 @@ mvn clean compile exec:java
 ```
 
 ## System Requirements
-- Windows, macOS, or Linux Operating System
-- Java 25 JDK
-- Apache Maven
+- Wait-Free Execution: **Windows 10/11**
+- Source Execution: **Windows, macOS, or Linux** (Requires Java 25 JDK & Maven)
 
-## Licensing
+## Authors & Licensing
+
+**Graphitizer** was designed and engineered by **Willy Langeveld** in collaboration with Google DeepMind's **Gemini 3.1** (Antigravity).
 
 Graphitizer is Free Software distributed under the **GNU General Public License (GPLv3)**. See the `LICENSE` file for more details. 
 
