@@ -36,3 +36,7 @@ Picture1.png
 Picture2.png
 Picture3.jpg
 capture_screenshot.ps1
+
+# Local tools and agent configs
+apache-maven-*/
+.agents/
