@@ -29,3 +29,10 @@ buildNumber.properties
 # macOS / Windows
 .DS_Store
 Thumbs.db
+
+# Local test media and scripts
+Picture 4.jfif
+Picture1.png
+Picture2.png
+Picture3.jpg
+capture_screenshot.ps1
