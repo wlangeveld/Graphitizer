@@ -35,7 +35,8 @@ Picture 4.jfif
 Picture1.png
 Picture2.png
 Picture3.jpg
-capture_screenshot.ps1
+*.ps1
+Todo.txt
 
 # Local tools and agent configs
 apache-maven-*/
