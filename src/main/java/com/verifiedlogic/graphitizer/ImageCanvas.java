@@ -750,14 +750,16 @@ public class ImageCanvas extends JPanel {
         if (hasAnyKey) {
             g2.setColor(Color.CYAN);
             Stroke oldStroke = g2.getStroke();
-            g2.setStroke(new BasicStroke(2.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f,
-                    new float[] { 9.0f }, 0.0f));
+            Stroke dashedStroke = new BasicStroke(2.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f,
+                    new float[] { 9.0f }, 0.0f);
+            Stroke solidStroke = new BasicStroke(2.0f);
 
             double[] stl = keyTL != null ? getScreenCoordinates(keyTL.x, keyTL.y) : null;
             double[] str = keyTR != null ? getScreenCoordinates(keyTR.x, keyTR.y) : null;
             double[] sbr = keyBR != null ? getScreenCoordinates(keyBR.x, keyBR.y) : null;
             double[] sbl = keyBL != null ? getScreenCoordinates(keyBL.x, keyBL.y) : null;
 
+            g2.setStroke(solidStroke);
             if (stl != null)
                 g2.drawOval((int) stl[0] - 5, (int) stl[1] - 5, 10, 10);
             if (str != null)
@@ -767,6 +769,7 @@ public class ImageCanvas extends JPanel {
             if (sbl != null)
                 g2.drawOval((int) sbl[0] - 5, (int) sbl[1] - 5, 10, 10);
 
+            g2.setStroke(dashedStroke);
             if (stl != null && str != null)
                 g2.drawLine((int) stl[0], (int) stl[1], (int) str[0], (int) str[1]);
             if (str != null && sbr != null)

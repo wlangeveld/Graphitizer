@@ -314,49 +314,87 @@ public class ImageAnalyzer {
         return resampled;
     }
 
-    /**
-     * Applies a 4-point Keystone (Perspective) warp to the given image.
-     * pts must be ordered: Top-Left, Top-Right, Bottom-Right, Bottom-Left
-     */
     public static BufferedImage applyKeystoneWarp(BufferedImage src, Point2D.Double[] pts) {
         if (pts == null || pts.length != 4)
             return src;
 
-        // Estimate target dimensions based on max width/height of the quad
+        // Estimate original quad dimensions
         double topW = pts[1].distance(pts[0]);
         double botW = pts[2].distance(pts[3]);
         double leftH = pts[3].distance(pts[0]);
         double rightH = pts[2].distance(pts[1]);
 
-        int dstWidth = (int) Math.round(Math.max(topW, botW));
-        int dstHeight = (int) Math.round(Math.max(leftH, rightH));
+        int quadW = (int) Math.round(Math.max(topW, botW));
+        int quadH = (int) Math.round(Math.max(leftH, rightH));
 
-        if (dstWidth <= 0 || dstHeight <= 0)
+        if (quadW <= 0 || quadH <= 0)
             return src;
 
-        Point2D.Double[] dstPts = new Point2D.Double[] {
+        Point2D.Double[] quadDstPts = new Point2D.Double[] {
                 new Point2D.Double(0, 0),
-                new Point2D.Double(dstWidth, 0),
-                new Point2D.Double(dstWidth, dstHeight),
-                new Point2D.Double(0, dstHeight)
+                new Point2D.Double(quadW, 0),
+                new Point2D.Double(quadW, quadH),
+                new Point2D.Double(0, quadH)
         };
 
-        double[] h = computeHomography(dstPts, pts); // Map Dst -> Src for inverse sampling
-        if (h == null)
+        // Forward Homography: Source -> Destination Space
+        double[] hFwd = computeHomography(pts, quadDstPts);
+        if (hFwd == null)
             return src;
 
-        BufferedImage dst = new BufferedImage(dstWidth, dstHeight, BufferedImage.TYPE_INT_ARGB);
+        // Inverse Homography: Destination Space -> Source for Sampling
+        double[] hInv = computeHomography(quadDstPts, pts); 
+        if (hInv == null)
+            return src;
+
         int srcW = src.getWidth();
         int srcH = src.getHeight();
 
+        // Project the 4 absolute corners of the source image into the infinite warped destination space
+        Point2D.Double[] srcCorners = new Point2D.Double[] {
+            new Point2D.Double(0, 0),
+            new Point2D.Double(srcW, 0),
+            new Point2D.Double(srcW, srcH),
+            new Point2D.Double(0, srcH)
+        };
+
+        Point2D.Double[] projCorners = new Point2D.Double[4];
+        for (int i=0; i<4; i++) {
+            double denom = hFwd[6] * srcCorners[i].x + hFwd[7] * srcCorners[i].y + hFwd[8];
+            double projX = (hFwd[0] * srcCorners[i].x + hFwd[1] * srcCorners[i].y + hFwd[2]) / denom;
+            double projY = (hFwd[3] * srcCorners[i].x + hFwd[4] * srcCorners[i].y + hFwd[5]) / denom;
+            projCorners[i] = new Point2D.Double(projX, projY);
+        }
+
+        // Calculate the maximum inscribed rectangular bounding box to guarantee NO transparent pixels.
+        // Approximated by pulling inward from the extreme outer geometric bounds until crossing the innermost vertices.
+        double innerMinX = Math.max(projCorners[0].x, projCorners[3].x); // Max of left edges
+        double innerMaxX = Math.min(projCorners[1].x, projCorners[2].x); // Min of right edges
+        double innerMinY = Math.max(projCorners[0].y, projCorners[1].y); // Max of top edges
+        double innerMaxY = Math.min(projCorners[3].y, projCorners[2].y); // Min of bottom edges
+
+        int dstWidth = (int) Math.floor(innerMaxX - innerMinX);
+        int dstHeight = (int) Math.floor(innerMaxY - innerMinY);
+
+        if (dstWidth <= 0 || dstHeight <= 0)
+            return src; // The warp mathematically inverted the image or destroyed it; abort.
+
+        BufferedImage dst = new BufferedImage(dstWidth, dstHeight, BufferedImage.TYPE_INT_ARGB);
+
         for (int y = 0; y < dstHeight; y++) {
             for (int x = 0; x < dstWidth; x++) {
-                double denominator = h[6] * x + h[7] * y + h[8];
-                double srcX = (h[0] * x + h[1] * y + h[2]) / denominator;
-                double srcY = (h[3] * x + h[4] * y + h[5]) / denominator;
+                
+                // Offset the x,y coordinates by the inscribed frame position we just calculated
+                double targetDstX = x + innerMinX;
+                double targetDstY = y + innerMinY;
 
-                int sx = (int) Math.round(srcX);
-                int sy = (int) Math.round(srcY);
+                // Sample using the Inverse homography
+                double denominator = hInv[6] * targetDstX + hInv[7] * targetDstY + hInv[8];
+                double sampleSrcX = (hInv[0] * targetDstX + hInv[1] * targetDstY + hInv[2]) / denominator;
+                double sampleSrcY = (hInv[3] * targetDstX + hInv[4] * targetDstY + hInv[5]) / denominator;
+
+                int sx = (int) Math.round(sampleSrcX);
+                int sy = (int) Math.round(sampleSrcY);
 
                 if (sx >= 0 && sx < srcW && sy >= 0 && sy < srcH) {
                     dst.setRGB(x, y, src.getRGB(sx, sy));

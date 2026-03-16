@@ -251,7 +251,7 @@ public class GraphitizerApp extends JFrame {
         plotAreaPanel.setBorder(BorderFactory.createTitledBorder("Plot Area Setup"));
 
         JPanel comboPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        plotAreaCombo = new JComboBox<>(new String[] { "None (Flat Image)", "Rectangular ROI", "Keystone Correction" });
+        plotAreaCombo = new JComboBox<>(new String[] { "None (Flat Image)", "Rectangular ROI", "Keystone Correction", "Raw Pixel Coordinates" });
         comboPanel.add(new JLabel("Mode:"));
         comboPanel.add(plotAreaCombo);
         plotAreaPanel.add(comboPanel);
@@ -300,11 +300,37 @@ public class GraphitizerApp extends JFrame {
         plotAreaCombo.addActionListener(e -> {
             boolean isKeystone = "Keystone Correction".equals(plotAreaCombo.getSelectedItem());
             boolean isRoi = "Rectangular ROI".equals(plotAreaCombo.getSelectedItem());
+            boolean isRawPixels = "Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem());
 
             keystoneGrid.setVisible(isKeystone);
             applyWarpPanel.setVisible(isKeystone);
 
             roiPanel.setVisible(isRoi);
+
+            if (isRawPixels && loadedImage != null) {
+                // Auto-calibrate
+                txtRealX1.setText("0");
+                txtRealX2.setText(String.valueOf(loadedImage.getWidth()));
+                txtRealY1.setText(String.valueOf(loadedImage.getHeight()));
+                txtRealY2.setText("0");
+
+                activeDataset.setPixX1(0.0);
+                activeDataset.setPixX2((double) loadedImage.getWidth());
+                activeDataset.setPixY1((double) loadedImage.getHeight());
+                activeDataset.setPixY2(0.0);
+                
+                txtPixX1.setText("0");
+                txtPixX2.setText(String.valueOf(loadedImage.getWidth()));
+                txtPixY1.setText(String.valueOf(loadedImage.getHeight()));
+                txtPixY2.setText("0");
+                
+                btnX1.setText("Set X1 ✓");
+                btnX2.setText("Set X2 ✓");
+                btnY1.setText("Set Y1 ✓");
+                btnY2.setText("Set Y2 ✓");
+                
+                checkCalibration();
+            }
 
             if (!isRoi) {
                 imageCanvas.setRoiPoints(null, null);
@@ -366,7 +392,7 @@ public class GraphitizerApp extends JFrame {
                 imageCanvas.repaint();
         });
 
-        modeCombo = new JComboBox<>(new String[] { "Point Mode", "Line Mode", "Raw Pixel Mode" });
+        modeCombo = new JComboBox<>(new String[] { "Point Mode", "Line Mode" });
         modeCombo.addActionListener(e -> {
             updateToolbarButtonVisibility();
             checkWizardState();
@@ -466,10 +492,6 @@ public class GraphitizerApp extends JFrame {
 
             @Override
             public boolean isReadyToPlot() {
-                if ("Raw Pixel Mode".equals(modeCombo.getSelectedItem())) {
-                    return true;
-                }
-                
                 if (activeDataset == null || activeDataset.getPixX1() == null || activeDataset.getPixX2() == null ||
                         activeDataset.getPixY1() == null || activeDataset.getPixY2() == null) {
                     JOptionPane.showMessageDialog(GraphitizerApp.this,
@@ -682,13 +704,12 @@ public class GraphitizerApp extends JFrame {
         if (dataPhasePanel == null)
             return;
             
-        boolean isRawMode = "Raw Pixel Mode".equals(modeCombo.getSelectedItem());
         boolean isCalibrated = activeDataset != null && activeDataset.getPixX1() != null
                 && activeDataset.getPixX2() != null &&
                 activeDataset.getPixY1() != null && activeDataset.getPixY2() != null;
 
-        // Reveal the data entry table if calibrated or in Raw Pixel Mode
-        dataPhasePanel.setVisible(isCalibrated || isRawMode);
+        // Reveal the data entry table if calibrated
+        dataPhasePanel.setVisible(isCalibrated);
     }
 
     private void autoSortData() {
@@ -739,14 +760,10 @@ public class GraphitizerApp extends JFrame {
     private void refreshTable() {
         tableModel.setRowCount(0);
         
-        boolean isRawMode = modeCombo != null && "Raw Pixel Mode".equals(modeCombo.getSelectedItem());
+        boolean isRawPixels = plotAreaCombo != null && "Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem());
         
         if (activeDataset != null) {
-            if (isRawMode) {
-                for (java.awt.geom.Point2D.Double p : activeDataset.getPoints()) {
-                    tableModel.addRow(new Object[] { (double) Math.round(p.x), (double) Math.round(p.y) });
-                }
-            } else if (activeDataset.getPixX1() != null && activeDataset.getPixX2() != null &&
+            if (activeDataset.getPixX1() != null && activeDataset.getPixX2() != null &&
                     activeDataset.getPixY1() != null && activeDataset.getPixY2() != null) {
                 try {
                     double realX1 = Double.parseDouble(txtRealX1.getText());
@@ -758,6 +775,12 @@ public class GraphitizerApp extends JFrame {
                                 activeDataset.getPixX2(), p.x, chkLogX.isSelected(), "X");
                         double plotY = calculateCoordinate(realY1, realY2, activeDataset.getPixY1(),
                                 activeDataset.getPixY2(), p.y, chkLogY.isSelected(), "Y");
+                        
+                        if (isRawPixels) {
+                            plotX = Math.round(plotX);
+                            plotY = Math.round(plotY);
+                        }
+                        
                         tableModel.addRow(new Object[] { plotX, plotY });
                     }
                 } catch (Exception ex) {
@@ -841,12 +864,11 @@ public class GraphitizerApp extends JFrame {
 
     private void updateToolbarButtonVisibility() {
         boolean hasPoints = activeDataset != null && !activeDataset.getPoints().isEmpty();
-        boolean isRawMode = "Raw Pixel Mode".equals(modeCombo.getSelectedItem());
         boolean isFullyCalibrated = activeDataset != null && activeDataset.getPixX1() != null
                 && activeDataset.getPixX2() != null &&
                 activeDataset.getPixY1() != null && activeDataset.getPixY2() != null;
         
-        boolean shouldShow = (isFullyCalibrated || isRawMode) && hasPoints && loadedImage != null;
+        boolean shouldShow = isFullyCalibrated && hasPoints && loadedImage != null;
 
         boolean isLineMode = "Line Mode".equals(modeCombo.getSelectedItem());
 
@@ -864,31 +886,31 @@ public class GraphitizerApp extends JFrame {
     private void recordDataPoint(double pixX, double pixY, int editIndex) {
         if (activeDataset == null) return;
         
-        boolean isRawMode = "Raw Pixel Mode".equals(modeCombo.getSelectedItem());
+        boolean isRawPixels = plotAreaCombo != null && "Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem());
 
-        if (isRawMode || (activeDataset.getPixX1() != null && activeDataset.getPixX2() != null &&
-                activeDataset.getPixY1() != null && activeDataset.getPixY2() != null)) {
+        if (activeDataset.getPixX1() != null && activeDataset.getPixX2() != null &&
+                activeDataset.getPixY1() != null && activeDataset.getPixY2() != null) {
             try {
-                double plotX = Math.round(pixX);
-                double plotY = Math.round(pixY);
-                
-                if (!isRawMode) {
-                    double realX1 = Double.parseDouble(txtRealX1.getText());
-                    double realX2 = Double.parseDouble(txtRealX2.getText());
-                    double realY1 = Double.parseDouble(txtRealY1.getText());
-                    double realY2 = Double.parseDouble(txtRealY2.getText());
-    
-                    if (activeDataset.getPixX2() - activeDataset.getPixX1() == 0
-                            || activeDataset.getPixY2() - activeDataset.getPixY1() == 0) {
-                        JOptionPane.showMessageDialog(this,
-                                "Calibration error: X1 and X2 (or Y1 and Y2) pixels are identical.");
-                        return;
-                    }
-    
-                    plotX = calculateCoordinate(realX1, realX2, activeDataset.getPixX1(), activeDataset.getPixX2(),
-                            pixX, chkLogX.isSelected(), "X");
-                    plotY = calculateCoordinate(realY1, realY2, activeDataset.getPixY1(), activeDataset.getPixY2(),
-                            pixY, chkLogY.isSelected(), "Y");
+                double realX1 = Double.parseDouble(txtRealX1.getText());
+                double realX2 = Double.parseDouble(txtRealX2.getText());
+                double realY1 = Double.parseDouble(txtRealY1.getText());
+                double realY2 = Double.parseDouble(txtRealY2.getText());
+
+                if (activeDataset.getPixX2() - activeDataset.getPixX1() == 0
+                        || activeDataset.getPixY2() - activeDataset.getPixY1() == 0) {
+                    JOptionPane.showMessageDialog(this,
+                            "Calibration error: X1 and X2 (or Y1 and Y2) pixels are identical.");
+                    return;
+                }
+
+                double plotX = calculateCoordinate(realX1, realX2, activeDataset.getPixX1(), activeDataset.getPixX2(),
+                        pixX, chkLogX.isSelected(), "X");
+                double plotY = calculateCoordinate(realY1, realY2, activeDataset.getPixY1(), activeDataset.getPixY2(),
+                        pixY, chkLogY.isSelected(), "Y");
+
+                if (isRawPixels) {
+                    plotX = Math.round(plotX);
+                    plotY = Math.round(plotY);
                 }
 
                 if (!"Manual Sort".equals(sortCombo.getSelectedItem())) {
@@ -1110,17 +1132,10 @@ public class GraphitizerApp extends JFrame {
         sb.append("Curve,X,Y\n");
         boolean anyData = false;
         
-        boolean isRawMode = "Raw Pixel Mode".equals(modeCombo.getSelectedItem());
+        boolean isRawPixels = plotAreaCombo != null && "Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem());
 
         for (Dataset ds : datasets) {
-            if (isRawMode) {
-                for (java.awt.geom.Point2D.Double p : ds.getPoints()) {
-                    sb.append(ds.getName()).append(",");
-                    sb.append(Math.round(p.x)).append(",");
-                    sb.append(Math.round(p.y)).append("\n");
-                    anyData = true;
-                }
-            } else if (ds.getPixX1() != null && ds.getPixX2() != null && ds.getPixY1() != null && ds.getPixY2() != null) {
+            if (ds.getPixX1() != null && ds.getPixX2() != null && ds.getPixY1() != null && ds.getPixY2() != null) {
                 try {
                     // Extract curve-specific real max/min if they exist, else fallback
                     double realX1 = ds.getRealX1() != null ? ds.getRealX1() : Double.parseDouble(txtRealX1.getText());
@@ -1133,9 +1148,20 @@ public class GraphitizerApp extends JFrame {
                                 chkLogX.isSelected(), "X");
                         double plotY = calculateCoordinate(realY1, realY2, ds.getPixY1(), ds.getPixY2(), p.y,
                                 chkLogY.isSelected(), "Y");
+                        
+                        if (isRawPixels) {
+                            plotX = Math.round(plotX);
+                            plotY = Math.round(plotY);
+                        }
+                        
                         sb.append(ds.getName()).append(",");
-                        sb.append(plotX).append(",");
-                        sb.append(plotY).append("\n");
+                        if (isRawPixels) {
+                            sb.append((long)plotX).append(",");
+                            sb.append((long)plotY).append("\n");
+                        } else {
+                            sb.append(plotX).append(",");
+                            sb.append(plotY).append("\n");
+                        }
                         anyData = true;
                     }
                 } catch (Exception ex) {
@@ -1204,20 +1230,10 @@ public class GraphitizerApp extends JFrame {
         java.awt.geom.Point2D.Double lastPoint = activeDataset.getPoints().get(activeDataset.getPoints().size() - 1);
         Point refPixel = new Point((int) Math.round(lastPoint.x), (int) Math.round(lastPoint.y));
 
-        double minX = Math.min(activeDataset.getPixX1(), activeDataset.getPixX2());
-        double maxX = Math.max(activeDataset.getPixX1(), activeDataset.getPixX2());
-        double minY = Math.min(activeDataset.getPixY1(), activeDataset.getPixY2());
-        double maxY = Math.max(activeDataset.getPixY1(), activeDataset.getPixY2());
+        // Default to the full image bounds so curves extending outside the calibrated axis grid aren't arbitrarily truncated.
+        Rectangle bounds = new Rectangle(0, 0, loadedImage.getWidth(), loadedImage.getHeight());
 
-        // Add a slight margin to avoid edge artifacts from calibration clicks
-        int pad = 5;
-        Rectangle bounds = new Rectangle(
-                (int) minX + pad,
-                (int) minY + pad,
-                (int) (maxX - minX) - pad * 2,
-                (int) (maxY - minY) - pad * 2);
-
-        // NEW: Use user ROI if active
+        // Use custom user ROI if explicitly enabled to mask off noise
         if ("Rectangular ROI".equals(plotAreaCombo.getSelectedItem()) && imageCanvas.getRoiTL() != null
                 && imageCanvas.getRoiBR() != null) {
             int roiX = (int) Math.min(imageCanvas.getRoiTL().x, imageCanvas.getRoiBR().x);
@@ -1294,20 +1310,10 @@ public class GraphitizerApp extends JFrame {
         double startY = lastPoint.y;
         final Point refPixel = new Point((int) Math.round(startX), (int) Math.round(startY));
 
-        double minX = Math.min(activeDataset.getPixX1(), activeDataset.getPixX2());
-        double maxX = Math.max(activeDataset.getPixX1(), activeDataset.getPixX2());
-        double minY = Math.min(activeDataset.getPixY1(), activeDataset.getPixY2());
-        double maxY = Math.max(activeDataset.getPixY1(), activeDataset.getPixY2());
+        // Default to the full image bounds so curves extending outside the calibrated axis grid aren't artificially blocked.
+        Rectangle bounds = new Rectangle(0, 0, loadedImage.getWidth(), loadedImage.getHeight());
 
-        // Add a slight margin
-        int pad = 5;
-        Rectangle bounds = new Rectangle(
-                (int) minX + pad,
-                (int) minY + pad,
-                (int) (maxX - minX) - pad * 2,
-                (int) (maxY - minY) - pad * 2);
-
-        // NEW: Use user ROI if active
+        // Use custom user ROI if explicitly enabled to mask off noise
         if ("Rectangular ROI".equals(plotAreaCombo.getSelectedItem()) && imageCanvas.getRoiTL() != null
                 && imageCanvas.getRoiBR() != null) {
             int roiX = (int) Math.min(imageCanvas.getRoiTL().x, imageCanvas.getRoiBR().x);
@@ -1317,7 +1323,7 @@ public class GraphitizerApp extends JFrame {
             bounds = new Rectangle(roiX, roiY, roiW, roiH);
         }
 
-        // Ensure bounds are within the image
+        // Ensure bounds are strictly within the image dimensions
         bounds = bounds.intersection(new Rectangle(0, 0, loadedImage.getWidth(), loadedImage.getHeight()));
         if (bounds.isEmpty() || bounds.width <= 0 || bounds.height <= 0) {
             JOptionPane.showMessageDialog(this,
