@@ -63,6 +63,39 @@ public class Dataset {
         return points;
     }
 
+    /**
+     * Immutable snapshot of the dataset's mutable point collections.
+     * Used by the Undo system to cheaply capture and restore state.
+     */
+    public static class DatasetSnapshot {
+        final List<Point2D.Double> points;
+        final Set<Point2D.Double> manualPoints;
+
+        DatasetSnapshot(List<Point2D.Double> points, Set<Point2D.Double> manualPoints) {
+            this.points = points;
+            this.manualPoints = manualPoints;
+        }
+    }
+
+    /** Returns a deep-copy snapshot of the current points state. */
+    public DatasetSnapshot takeSnapshot() {
+        List<Point2D.Double> ptsCopy = new ArrayList<>();
+        for (Point2D.Double p : points)
+            ptsCopy.add(new Point2D.Double(p.x, p.y));
+        Set<Point2D.Double> manCopy = new HashSet<>();
+        for (Point2D.Double p : manualPoints)
+            manCopy.add(new Point2D.Double(p.x, p.y));
+        return new DatasetSnapshot(ptsCopy, manCopy);
+    }
+
+    /** Restores points and manualPoints from a previously taken snapshot. */
+    public void restoreSnapshot(DatasetSnapshot snap) {
+        points.clear();
+        points.addAll(snap.points);
+        manualPoints.clear();
+        manualPoints.addAll(snap.manualPoints);
+    }
+
     // --- Calibration Getters and Setters ---
 
     public Double getPixX1() {

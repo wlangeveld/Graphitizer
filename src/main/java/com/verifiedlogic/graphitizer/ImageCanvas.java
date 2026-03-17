@@ -69,6 +69,23 @@ public class ImageCanvas extends JPanel {
 
     private PointSelectedListener listener;
 
+    /**
+     * Optional callback invoked immediately BEFORE any point is added, deleted,
+     * or moved. Used by GraphitizerApp to push an undo snapshot onto the history
+     * stack without requiring a hard dependency on the app class.
+     */
+    private Runnable undoCallback;
+
+    /** Registers the undo snapshot callback (set once after construction). */
+    public void setUndoCallback(Runnable callback) {
+        this.undoCallback = callback;
+    }
+
+    /** Fires the undo callback if one has been registered. */
+    private void fireUndoSnapshot() {
+        if (undoCallback != null) undoCallback.run();
+    }
+
     private List<Dataset> datasets = new ArrayList<>();
     private Dataset activeDataset = null;
     private int editingIndex = -1;
@@ -157,6 +174,8 @@ public class ImageCanvas extends JPanel {
                     if (e.getButton() == MouseEvent.BUTTON3 && state == State.IDLE) {
                         int hit = getHitIndex(e.getPoint());
                         if (hit >= 0 && activeDataset != null) {
+                            // Snapshot before deleting so the user can undo
+                            fireUndoSnapshot();
                             activeDataset.getPoints().remove(hit);
                             if (ImageCanvas.this.listener != null)
                                 ImageCanvas.this.listener.onPointDeleted(hit);
@@ -239,13 +258,19 @@ public class ImageCanvas extends JPanel {
                     state = State.IDLE;
 
                     if (oldState == State.ZOOMED_IN) {
-                        if (activeDataset != null)
+                        if (activeDataset != null) {
+                            // Snapshot before adding a new point so the user can undo
+                            fireUndoSnapshot();
                             activeDataset.getPoints().add(new java.awt.geom.Point2D.Double(finalX, finalY));
+                        }
                         if (ImageCanvas.this.listener != null)
                             ImageCanvas.this.listener.onPointAdded(finalX, finalY);
                     } else if (oldState == State.EDIT_ZOOMED_IN) {
-                        if (activeDataset != null)
+                        if (activeDataset != null) {
+                            // Snapshot before moving a point so the user can undo
+                            fireUndoSnapshot();
                             activeDataset.getPoints().get(editingIndex).setLocation(finalX, finalY);
+                        }
                         if (ImageCanvas.this.listener != null)
                             ImageCanvas.this.listener.onPointEdited(editingIndex, finalX, finalY);
                     } else {
@@ -456,6 +481,8 @@ public class ImageCanvas extends JPanel {
                 } else if (e.getKeyCode() == java.awt.event.KeyEvent.VK_DELETE
                         || e.getKeyCode() == java.awt.event.KeyEvent.VK_BACK_SPACE) {
                     if (state == State.EDIT_ZOOMED_IN && activeDataset != null) {
+                        // Snapshot before delete-in-edit-mode so the user can undo
+                        fireUndoSnapshot();
                         activeDataset.getPoints().remove(editingIndex);
                         if (ImageCanvas.this.listener != null)
                             ImageCanvas.this.listener.onPointDeleted(editingIndex);
@@ -464,6 +491,8 @@ public class ImageCanvas extends JPanel {
                     } else if (state == State.IDLE && activeDataset != null) {
                         int hit = getHitIndex(mousePos);
                         if (hit >= 0) {
+                            // Snapshot before idle-mode key-delete so the user can undo
+                            fireUndoSnapshot();
                             activeDataset.getPoints().remove(hit);
                             if (ImageCanvas.this.listener != null)
                                 ImageCanvas.this.listener.onPointDeleted(hit);

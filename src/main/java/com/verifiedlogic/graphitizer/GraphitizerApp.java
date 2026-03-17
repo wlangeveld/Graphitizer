@@ -52,6 +52,10 @@ public class GraphitizerApp extends JFrame {
     private JButton btnTraceLine;
     private JSlider pointsSlider;
     private JLabel lblNumPoints;
+    /** Live readout of the current X-Step slider value (shown after the slider). */
+    private JLabel lblPointsValue;
+    /** Live readout of the current Tolerance slider value (shown after the slider). */
+    private JLabel lblAccuracyValue;
     private JLabel lblRoiInstruction;
 
     private List<Dataset> datasets = new java.util.ArrayList<>();
@@ -67,6 +71,13 @@ public class GraphitizerApp extends JFrame {
     private JPanel keystoneGrid;
     private static final Color[] CURVE_COLORS = { Color.RED, Color.BLUE, Color.GREEN, new Color(255, 128, 0),
             Color.MAGENTA, Color.CYAN };
+
+    // --- Undo System ---
+    /** Maximum number of undo steps retained in memory. */
+    private static final int MAX_UNDO = 50;
+    /** Stack of (dataset, snapshot) pairs; top = most recent undoable action. */
+    private final java.util.Deque<Object[]> undoStack = new java.util.ArrayDeque<>();
+    private JButton btnUndo;
 
     public GraphitizerApp() {
         setTitle("Graphitizer v1.0");
@@ -103,7 +114,14 @@ public class GraphitizerApp extends JFrame {
         accuracySlider = new JSlider(5, 100, 30);
         accuracySlider.setVisible(false);
         accuracySlider.setPreferredSize(new java.awt.Dimension(120, 25));
+        accuracySlider.setFocusable(false); // Suppress the dotted focus border
         accuracySlider.setToolTipText("Adjust template matching tolerance (higher = looser match)");
+        // Live readout: shows current tolerance in ΔE (Euclidean color-distance) units
+        lblAccuracyValue = new JLabel("  " + accuracySlider.getValue() + " ΔE  ");
+        lblAccuracyValue.setFont(lblAccuracyValue.getFont().deriveFont(java.awt.Font.ITALIC));
+        lblAccuracyValue.setForeground(new Color(80, 80, 80));
+        lblAccuracyValue.setVisible(false);
+        accuracySlider.addChangeListener(e -> lblAccuracyValue.setText("  " + accuracySlider.getValue() + " ΔE  "));
 
         btnTraceLine = new JButton("Trace This Line");
         styleButton(btnTraceLine);
@@ -115,7 +133,14 @@ public class GraphitizerApp extends JFrame {
         pointsSlider = new JSlider(1, 100, 10); // Default to 10px spacing
         pointsSlider.setVisible(false);
         pointsSlider.setPreferredSize(new java.awt.Dimension(120, 25));
+        pointsSlider.setFocusable(false); // Suppress the dotted focus border
         pointsSlider.setToolTipText("Distance in pixels between generated points");
+        // Live readout: shows current step size in pixels
+        lblPointsValue = new JLabel("  " + pointsSlider.getValue() + " px  ");
+        lblPointsValue.setFont(lblPointsValue.getFont().deriveFont(java.awt.Font.ITALIC));
+        lblPointsValue.setForeground(new Color(80, 80, 80));
+        lblPointsValue.setVisible(false);
+        pointsSlider.addChangeListener(e -> lblPointsValue.setText("  " + pointsSlider.getValue() + " px  "));
 
         activeDataset = new Dataset("Curve 1", CURVE_COLORS[0]);
         datasets.add(activeDataset);
@@ -145,11 +170,13 @@ public class GraphitizerApp extends JFrame {
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(lblAccuracy);
         toolBar.add(accuracySlider);
+        toolBar.add(lblAccuracyValue);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(btnTraceLine);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(lblNumPoints);
         toolBar.add(pointsSlider);
+        toolBar.add(lblPointsValue);
         add(toolBar, BorderLayout.NORTH);
 
         // WEST Calibration Panel -> Now moved to rightPanel NORTH
@@ -403,11 +430,19 @@ public class GraphitizerApp extends JFrame {
         modePanel.add(modeCombo);
         modePanel.add(sortCombo);
 
+        btnUndo = new JButton("Undo");
+        styleButton(btnUndo);
+        btnUndo.setForeground(new Color(200, 120, 0)); // Warm amber — "reverse action"
+        btnUndo.setEnabled(false);
+        btnUndo.setToolTipText("Undo the last point add, delete, move, or autotrace (Ctrl+Z)");
+        btnUndo.addActionListener(e -> undo());
+
         JPanel curvePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         curvePanel.add(new JLabel("Active Curve:"));
         curvePanel.add(curveCombo);
         curvePanel.add(newCurveBtn);
         curvePanel.add(clearBtn);
+        curvePanel.add(btnUndo);
 
         JPanel topOptionsPanel = new JPanel(new BorderLayout());
         topOptionsPanel.add(modePanel, BorderLayout.NORTH);
@@ -684,6 +719,61 @@ public class GraphitizerApp extends JFrame {
         btnTR.addActionListener(e -> imageCanvas.setState(ImageCanvas.State.PICK_TR));
         btnBR.addActionListener(e -> imageCanvas.setState(ImageCanvas.State.PICK_BR));
         btnBL.addActionListener(e -> imageCanvas.setState(ImageCanvas.State.PICK_BL));
+
+        // Register Ctrl-Z globally and give ImageCanvas a callback so its own
+        // point mutations (add, delete, move via mouse/keyboard) can push undo entries.
+        registerUndoKeyBinding();
+        imageCanvas.setUndoCallback(() -> pushUndo(activeDataset));
+    }
+
+    // -----------------------------------------------------------------------
+    // Undo helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Snapshot the active dataset's current point list BEFORE mutating it.
+     * Must be called immediately before any add / delete / move / autotrace
+     * operation so that undo() can roll it back.
+     */
+    void pushUndo(Dataset ds) {
+        if (ds == null) return;
+        // Trim to keep stack within MAX_UNDO entries
+        while (undoStack.size() >= MAX_UNDO)
+            ((java.util.ArrayDeque<?>) undoStack).pollLast();
+        undoStack.push(new Object[]{ ds, ds.takeSnapshot() });
+        btnUndo.setEnabled(true);
+    }
+
+    /**
+     * Pops the top entry from the undo stack and restores its snapshot,
+     * then refreshes the data table and canvas.
+     */
+    private void undo() {
+        if (undoStack.isEmpty()) return;
+        Object[] entry = undoStack.pop();
+        Dataset ds = (Dataset) entry[0];
+        Dataset.DatasetSnapshot snap = (Dataset.DatasetSnapshot) entry[1];
+        ds.restoreSnapshot(snap);
+        refreshTable();
+        if (imageCanvas != null) imageCanvas.repaint();
+        btnUndo.setEnabled(!undoStack.isEmpty());
+    }
+
+    /**
+     * Registers the global Ctrl-Z key binding on the JFrame root pane.
+     * Called once after the frame is fully constructed.
+     */
+    private void registerUndoKeyBinding() {
+        javax.swing.InputMap im = getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
+        javax.swing.ActionMap am = getRootPane().getActionMap();
+        im.put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Z,
+                java.awt.event.InputEvent.CTRL_DOWN_MASK), "globalUndo");
+        am.put("globalUndo", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                undo();
+            }
+        });
     }
 
     private void checkCalibration() {
@@ -876,10 +966,12 @@ public class GraphitizerApp extends JFrame {
             btnFindSimilar.setVisible(shouldShow && !isLineMode);
             lblAccuracy.setVisible(shouldShow && !isLineMode);
             accuracySlider.setVisible(shouldShow && !isLineMode);
+            lblAccuracyValue.setVisible(shouldShow && !isLineMode);
 
             btnTraceLine.setVisible(shouldShow && isLineMode);
             lblNumPoints.setVisible(shouldShow && isLineMode);
             pointsSlider.setVisible(shouldShow && isLineMode);
+            lblPointsValue.setVisible(shouldShow && isLineMode);
         }
     }
 
@@ -1024,12 +1116,52 @@ public class GraphitizerApp extends JFrame {
                 resetApplication(); // Reset before setting new image
                 loadedImage = img;
                 imageCanvas.setImage(loadedImage);
+                // If already in Raw Pixel mode, auto-calibrate to the new image dimensions
+                applyRawPixelCalibrationIfActive();
             } else {
                 JOptionPane.showMessageDialog(this, "Could not read image from file: " + file.getName());
             }
         } catch (IOException ex) {
             JOptionPane.showMessageDialog(this, "Error loading image: " + ex.getMessage());
         }
+    }
+
+    /**
+     * If the Plot Area combo is set to "Raw Pixel Coordinates" and an image is
+     * loaded, automatically populates the axis calibration fields with the
+     * image's pixel boundaries. This mirrors exactly what happens when the user
+     * switches the combo to that mode while an image is already open.
+     */
+    private void applyRawPixelCalibrationIfActive() {
+        if (loadedImage == null || !"Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem()))
+            return;
+
+        txtRealX1.setText("0");
+        txtRealX2.setText(String.valueOf(loadedImage.getWidth()));
+        txtRealY1.setText(String.valueOf(loadedImage.getHeight()));
+        txtRealY2.setText("0");
+
+        activeDataset.setPixX1(0.0);
+        activeDataset.setPixX2((double) loadedImage.getWidth());
+        activeDataset.setPixY1((double) loadedImage.getHeight());
+        activeDataset.setPixY2(0.0);
+
+        txtPixX1.setText("0");
+        txtPixX2.setText(String.valueOf(loadedImage.getWidth()));
+        txtPixY1.setText(String.valueOf(loadedImage.getHeight()));
+        txtPixY2.setText("0");
+
+        btnX1.setText("Set X1 ✓");
+        btnX2.setText("Set X2 ✓");
+        btnY1.setText("Set Y1 ✓");
+        btnY2.setText("Set Y2 ✓");
+
+        btnX1.setForeground(Color.BLACK);
+        btnX2.setForeground(Color.BLACK);
+        btnY1.setForeground(Color.BLACK);
+        btnY2.setForeground(Color.BLACK);
+
+        checkCalibration();
     }
 
     private void pasteImage(ActionEvent e) {
@@ -1043,6 +1175,8 @@ public class GraphitizerApp extends JFrame {
                 resetApplication();
                 loadedImage = toBufferedImage(img);
                 imageCanvas.setImage(loadedImage);
+                // If already in Raw Pixel mode, auto-calibrate to the new image dimensions
+                applyRawPixelCalibrationIfActive();
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(this, "Error pasting image: " + ex.getMessage());
             }
@@ -1267,6 +1401,8 @@ public class GraphitizerApp extends JFrame {
                 try {
                     List<java.awt.geom.Point2D.Double> results = get();
                     if (results != null && !results.isEmpty()) {
+                        // Snapshot before bulk-adding auto-found points so Undo works
+                        pushUndo(activeDataset);
                         for (java.awt.geom.Point2D.Double p : results) {
                             // Don't re-add the exact same template source center
                             if (p.distanceSq(refPixel) > 25.0) {
@@ -1430,6 +1566,8 @@ public class GraphitizerApp extends JFrame {
                         }
 
                         if (!newPoints.isEmpty()) {
+                            // Snapshot before bulk-adding autotrace points so Undo works
+                            pushUndo(activeDataset);
                             activeDataset.getPoints().addAll(newPoints);
                         }
 
