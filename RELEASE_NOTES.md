@@ -6,8 +6,8 @@
 *   **Temporal Redo Feature:** `Ctrl-Y` seamlessly reverses the effects of `Undo`, dynamically swapping snapshots of the current view stack on the fly.
 *   **Selection-Aware UX:** Have a subset of plot points selected? Operations like `Clear`, `Copy Data`, and `Save Data As` now act entirely localized on just that subset.
 *   **Global Eraser Bindings:** Hitting `Backspace` or `Delete` directly snips the row from the data table natively. `Ctrl-A` efficiently toggles selecting or unselecting all rows.
-
 ---
+
 
 # Graphitizer 1.0 - Initial Release
 
