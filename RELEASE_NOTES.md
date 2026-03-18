@@ -1,3 +1,15 @@
+# Graphitizer 1.1
+
+Welcome to **Graphitizer 1.1**! We've made our UX leaps forward regarding point selection and corrections.
+
+## Major Features in Version 1.1
+*   **Sequential Multi-Point Keystone:** Easily pick tracking bounds by sequentially clicking the four canvas corners before warping (fully Undo-integrated).
+*   **Temporal Redo Feature:** `Ctrl-Y` seamlessly reverses the effects of `Undo`, dynamically swapping snapshots of the current view stack on the fly.
+*   **Selection-Aware UX:** Have a subset of plot points selected? Operations like `Clear`, `Copy Data`, and `Save Data As` now act entirely localized on just that subset.
+*   **Global Eraser Bindings:** Hitting `Backspace` or `Delete` directly snips the row from the data table natively. `Ctrl-A` efficiently toggles all rows on or off.
+
+---
+
 # Graphitizer 1.0 - Initial Release
 
 Welcome to the very first stable release of **Graphitizer**!

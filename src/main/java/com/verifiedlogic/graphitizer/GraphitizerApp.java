@@ -41,6 +41,7 @@ public class GraphitizerApp extends JFrame {
     private JPanel dataPhasePanel;
     private JTextField txtPixX1, txtPixX2, txtPixY1, txtPixY2;
     private java.awt.geom.Point2D.Double keyTL, keyTR, keyBR, keyBL;
+    private java.util.List<java.awt.geom.Point2D.Double> tempKeystonePoints = new java.util.ArrayList<>();
     private JLabel statusLabel;
     private JCheckBox chkLogX, chkLogY;
 
@@ -75,12 +76,22 @@ public class GraphitizerApp extends JFrame {
     // --- Undo System ---
     /** Maximum number of undo steps retained in memory. */
     private static final int MAX_UNDO = 50;
-    /** Stack of (dataset, snapshot) pairs; top = most recent undoable action. */
-    private final java.util.Deque<Object[]> undoStack = new java.util.ArrayDeque<>();
+    // Undo Stack — Stores closures (Runnables) that, when executed, revert the state
+    private static class UndoItem {
+        final Runnable restorePast;
+        final java.util.function.Supplier<Runnable> capturePresent;
+        UndoItem(Runnable restorePast, java.util.function.Supplier<Runnable> capturePresent) {
+            this.restorePast = restorePast;
+            this.capturePresent = capturePresent;
+        }
+    }
+
+    private java.util.Deque<UndoItem> undoStack = new java.util.ArrayDeque<>();
+    private java.util.Deque<UndoItem> redoStack = new java.util.ArrayDeque<>();
     private JButton btnUndo;
 
     public GraphitizerApp() {
-        setTitle("Graphitizer v1.0");
+        setTitle("Graphitizer v1.1");
         try {
             java.awt.Image appIcon = javax.imageio.ImageIO.read(getClass().getResource("/icon.png"));
             setIconImage(appIcon);
@@ -165,7 +176,7 @@ public class GraphitizerApp extends JFrame {
         toolBar.add(copyBtn);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(saveAsBtn);
-        toolBar.addSeparator();
+        toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(btnFindSimilar);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(lblAccuracy);
@@ -332,6 +343,17 @@ public class GraphitizerApp extends JFrame {
             keystoneGrid.setVisible(isKeystone);
             applyWarpPanel.setVisible(isKeystone);
 
+            if (isKeystone) {
+                tempKeystonePoints.clear();
+                keyTL = keyTR = keyBR = keyBL = null;
+                btnTL.setText("Set Top Left");
+                btnTR.setText("Set Top Right");
+                btnBL.setText("Set Bottom Left");
+                btnBR.setText("Set Bottom Right");
+                imageCanvas.setKeystonePoints(null, null, null, null);
+                imageCanvas.setState(ImageCanvas.State.PICK_KEYSTONE_MULTI);
+            }
+
             roiPanel.setVisible(isRoi);
 
             if (isRawPixels && loadedImage != null) {
@@ -359,12 +381,12 @@ public class GraphitizerApp extends JFrame {
                 checkCalibration();
             }
 
-            if (!isRoi) {
+            if (!isRoi && !isKeystone) {
                 imageCanvas.setRoiPoints(null, null);
                 imageCanvas.setState(ImageCanvas.State.IDLE);
                 if (lblRoiInstruction != null)
                     lblRoiInstruction.setVisible(false);
-            } else {
+            } else if (isRoi) {
                 imageCanvas.setState(ImageCanvas.State.DRAG_ROI);
                 if (lblRoiInstruction != null)
                     lblRoiInstruction.setVisible(imageCanvas.getRoiTL() == null);
@@ -401,12 +423,23 @@ public class GraphitizerApp extends JFrame {
         table = new JTable(tableModel);
         JScrollPane scrollPane = new JScrollPane(table);
 
-        clearBtn.addActionListener(e -> {
-            if (activeDataset != null) {
-                activeDataset.getPoints().clear();
-                refreshTable();
-                if (imageCanvas != null)
-                    imageCanvas.repaint();
+        clearBtn.addActionListener(e -> clearSelectedOrAll());
+        
+        table.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override
+            public void keyPressed(java.awt.event.KeyEvent e) {
+                if (e.getKeyCode() == java.awt.event.KeyEvent.VK_DELETE || 
+                    e.getKeyCode() == java.awt.event.KeyEvent.VK_BACK_SPACE) {
+                    clearSelectedOrAll();
+                    e.consume();
+                } else if (e.getKeyCode() == java.awt.event.KeyEvent.VK_A && e.isControlDown()) {
+                    e.consume(); // Hijack default select-all
+                    if (table.getSelectedRowCount() == table.getRowCount() && table.getRowCount() > 0) {
+                        table.clearSelection();
+                    } else {
+                        table.selectAll();
+                    }
+                }
             }
         });
 
@@ -434,7 +467,7 @@ public class GraphitizerApp extends JFrame {
         styleButton(btnUndo);
         btnUndo.setForeground(new Color(200, 120, 0)); // Warm amber — "reverse action"
         btnUndo.setEnabled(false);
-        btnUndo.setToolTipText("Undo the last point add, delete, move, or autotrace (Ctrl+Z)");
+        btnUndo.setToolTipText("Undo the last point add, delete, move, or autotrace (Ctrl+Z). Redo (Ctrl+Y)");
         btnUndo.addActionListener(e -> undo());
 
         JPanel curvePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -483,21 +516,73 @@ public class GraphitizerApp extends JFrame {
                         btnY2.setText("Set Y2 ✓");
                         checkCalibration();
                     } else if (state == ImageCanvas.State.ZOOMED_TL) {
+                        final java.awt.geom.Point2D.Double oldPt = keyTL;
+                        Runnable undoKeystone = () -> {
+                            keyTL = oldPt;
+                            btnTL.setText(oldPt != null ? String.format("%.1f, %.1f", oldPt.x, oldPt.y) : "Set Top Left");
+                            imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+                        };
+                        pushUndoAction(new UndoItem(undoKeystone, () -> captureKeystoneState()));
+                        
                         keyTL = new java.awt.geom.Point2D.Double(x, y);
                         btnTL.setText(String.format("%.1f, %.1f", x, y));
                         imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
                     } else if (state == ImageCanvas.State.ZOOMED_TR) {
+                        final java.awt.geom.Point2D.Double oldPt = keyTR;
+                        Runnable undoKeystone = () -> {
+                            keyTR = oldPt;
+                            btnTR.setText(oldPt != null ? String.format("%.1f, %.1f", oldPt.x, oldPt.y) : "Set Top Right");
+                            imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+                        };
+                        pushUndoAction(new UndoItem(undoKeystone, () -> captureKeystoneState()));
+
                         keyTR = new java.awt.geom.Point2D.Double(x, y);
                         btnTR.setText(String.format("%.1f, %.1f", x, y));
                         imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
                     } else if (state == ImageCanvas.State.ZOOMED_BR) {
+                        final java.awt.geom.Point2D.Double oldPt = keyBR;
+                        Runnable undoKeystone = () -> {
+                            keyBR = oldPt;
+                            btnBR.setText(oldPt != null ? String.format("%.1f, %.1f", oldPt.x, oldPt.y) : "Set Bottom Right");
+                            imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+                        };
+                        pushUndoAction(new UndoItem(undoKeystone, () -> captureKeystoneState()));
+
                         keyBR = new java.awt.geom.Point2D.Double(x, y);
                         btnBR.setText(String.format("%.1f, %.1f", x, y));
                         imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
                     } else if (state == ImageCanvas.State.ZOOMED_BL) {
+                        final java.awt.geom.Point2D.Double oldPt = keyBL;
+                        Runnable undoKeystone = () -> {
+                            keyBL = oldPt;
+                            btnBL.setText(oldPt != null ? String.format("%.1f, %.1f", oldPt.x, oldPt.y) : "Set Bottom Left");
+                            imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+                        };
+                        pushUndoAction(new UndoItem(undoKeystone, () -> captureKeystoneState()));
+
                         keyBL = new java.awt.geom.Point2D.Double(x, y);
                         btnBL.setText(String.format("%.1f, %.1f", x, y));
                         imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+                    } else if (state == ImageCanvas.State.ZOOMED_KEYSTONE_MULTI) {
+                        java.awt.geom.Point2D.Double newPt = new java.awt.geom.Point2D.Double(x, y);
+                        int indexAdded = tempKeystonePoints.size();
+                        
+                        Runnable undoKeystone = () -> {
+                            tempKeystonePoints.remove(indexAdded);
+                            updateKeystonePointsUI();
+                            imageCanvas.setState(ImageCanvas.State.PICK_KEYSTONE_MULTI);
+                        };
+                        pushUndoAction(new UndoItem(undoKeystone, () -> captureKeystoneState()));
+                        
+                        tempKeystonePoints.add(newPt);
+                        updateKeystonePointsUI();
+                        
+                        if (tempKeystonePoints.size() == 4) {
+                            sortAndAssignKeystonePoints();
+                            imageCanvas.setState(ImageCanvas.State.IDLE);
+                        } else {
+                            imageCanvas.setState(ImageCanvas.State.PICK_KEYSTONE_MULTI);
+                        }
                     }
                 }
             }
@@ -727,8 +812,99 @@ public class GraphitizerApp extends JFrame {
     }
 
     // -----------------------------------------------------------------------
+    // Keystone helpers
+    // -----------------------------------------------------------------------
+
+    private void updateKeystonePointsUI() {
+        if (tempKeystonePoints.size() > 0) {
+            keyTL = tempKeystonePoints.get(0);
+            btnTL.setText(String.format("%.1f, %.1f", keyTL.x, keyTL.y));
+        } else {
+            keyTL = null;
+            btnTL.setText("Set Top Left");
+        }
+        if (tempKeystonePoints.size() > 1) {
+            keyTR = tempKeystonePoints.get(1);
+            btnTR.setText(String.format("%.1f, %.1f", keyTR.x, keyTR.y));
+        } else {
+            keyTR = null;
+            btnTR.setText("Set Top Right");
+        }
+        if (tempKeystonePoints.size() > 2) {
+            keyBR = tempKeystonePoints.get(2);
+            btnBR.setText(String.format("%.1f, %.1f", keyBR.x, keyBR.y));
+        } else {
+            keyBR = null;
+            btnBR.setText("Set Bottom Right");
+        }
+        if (tempKeystonePoints.size() > 3) {
+            keyBL = tempKeystonePoints.get(3);
+            btnBL.setText(String.format("%.1f, %.1f", keyBL.x, keyBL.y));
+        } else {
+            keyBL = null;
+            btnBL.setText("Set Bottom Left");
+        }
+        imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+    }
+
+    private void sortAndAssignKeystonePoints() {
+        if (tempKeystonePoints.size() < 4) return;
+        java.util.List<java.awt.geom.Point2D.Double> pts = new java.util.ArrayList<>(tempKeystonePoints);
+        
+        // Sort by X first to separate left side vs right side
+        pts.sort((p1, p2) -> Double.compare(p1.x, p2.x));
+        java.util.List<java.awt.geom.Point2D.Double> leftPts = pts.subList(0, 2);
+        java.util.List<java.awt.geom.Point2D.Double> rightPts = pts.subList(2, 4);
+        
+        // Sort left side by Y to get Top Left vs Bottom Left
+        leftPts.sort((p1, p2) -> Double.compare(p1.y, p2.y));
+        keyTL = leftPts.get(0);
+        keyBL = leftPts.get(1);
+        
+        // Sort right side by Y to get Top Right vs Bottom Right
+        rightPts.sort((p1, p2) -> Double.compare(p1.y, p2.y));
+        keyTR = rightPts.get(0);
+        keyBR = rightPts.get(1);
+        
+        // Match the UI's temporary list ordering to the logical TR, TL, BR, BL order
+        tempKeystonePoints.clear();
+        tempKeystonePoints.add(keyTL);
+        tempKeystonePoints.add(keyTR);
+        tempKeystonePoints.add(keyBR);
+        tempKeystonePoints.add(keyBL);
+        
+        updateKeystonePointsUI();
+    }
+
+    // -----------------------------------------------------------------------
     // Undo helpers
     // -----------------------------------------------------------------------
+
+    private Runnable captureKeystoneState() {
+        final java.awt.geom.Point2D.Double curTL = keyTL;
+        final java.awt.geom.Point2D.Double curTR = keyTR;
+        final java.awt.geom.Point2D.Double curBL = keyBL;
+        final java.awt.geom.Point2D.Double curBR = keyBR;
+        final java.util.List<java.awt.geom.Point2D.Double> curTemp = new java.util.ArrayList<>(tempKeystonePoints);
+        final ImageCanvas.State curState = imageCanvas.getState();
+        
+        return () -> {
+            keyTL = curTL;
+            btnTL.setText(curTL != null ? String.format("%.1f, %.1f", curTL.x, curTL.y) : "Set Top Left");
+            keyTR = curTR;
+            btnTR.setText(curTR != null ? String.format("%.1f, %.1f", curTR.x, curTR.y) : "Set Top Right");
+            keyBR = curBR;
+            btnBR.setText(curBR != null ? String.format("%.1f, %.1f", curBR.x, curBR.y) : "Set Bottom Right");
+            keyBL = curBL;
+            btnBL.setText(curBL != null ? String.format("%.1f, %.1f", curBL.x, curBL.y) : "Set Bottom Left");
+
+            tempKeystonePoints.clear();
+            tempKeystonePoints.addAll(curTemp);
+            
+            imageCanvas.setKeystonePoints(keyTL, keyTR, keyBR, keyBL);
+            imageCanvas.setState(curState);
+        };
+    }
 
     /**
      * Snapshot the active dataset's current point list BEFORE mutating it.
@@ -737,31 +913,71 @@ public class GraphitizerApp extends JFrame {
      */
     void pushUndo(Dataset ds) {
         if (ds == null) return;
+        final Dataset.DatasetSnapshot snap = ds.takeSnapshot();
+        
+        Runnable restoreAction = () -> {
+            ds.restoreSnapshot(snap);
+            refreshTable();
+            if (imageCanvas != null) imageCanvas.repaint();
+        };
+        
+        java.util.function.Supplier<Runnable> capturePresent = () -> {
+            final Dataset.DatasetSnapshot currentSnap = ds.takeSnapshot();
+            return () -> {
+                ds.restoreSnapshot(currentSnap);
+                refreshTable();
+                if (imageCanvas != null) imageCanvas.repaint();
+            };
+        };
+        
+        pushUndoAction(new UndoItem(restoreAction, capturePresent), true);
+    }
+    
+    /**
+     * Pushes a generic undo action onto the stack.
+     */
+    void pushUndoAction(UndoItem ui) {
+        pushUndoAction(ui, true);
+    }
+    
+    void pushUndoAction(UndoItem ui, boolean clearRedo) {
         // Trim to keep stack within MAX_UNDO entries
         while (undoStack.size() >= MAX_UNDO)
             ((java.util.ArrayDeque<?>) undoStack).pollLast();
-        undoStack.push(new Object[]{ ds, ds.takeSnapshot() });
+        undoStack.push(ui);
         btnUndo.setEnabled(true);
+        if (clearRedo) {
+            redoStack.clear();
+        }
     }
 
     /**
-     * Pops the top entry from the undo stack and restores its snapshot,
-     * then refreshes the data table and canvas.
+     * Pops the top entry from the undo stack and executes its restore Runnable.
      */
     private void undo() {
         if (undoStack.isEmpty()) return;
-        Object[] entry = undoStack.pop();
-        Dataset ds = (Dataset) entry[0];
-        Dataset.DatasetSnapshot snap = (Dataset.DatasetSnapshot) entry[1];
-        ds.restoreSnapshot(snap);
-        refreshTable();
-        if (imageCanvas != null) imageCanvas.repaint();
+        UndoItem item = undoStack.pop();
+        
+        Runnable redoAction = item.capturePresent.get();
+        redoStack.push(new UndoItem(redoAction, item.capturePresent));
+        
+        item.restorePast.run();
+        btnUndo.setEnabled(!undoStack.isEmpty());
+    }
+
+    private void redo() {
+        if (redoStack.isEmpty()) return;
+        UndoItem item = redoStack.pop();
+        
+        Runnable undoAction = item.capturePresent.get();
+        undoStack.push(new UndoItem(undoAction, item.capturePresent));
+        
+        item.restorePast.run();
         btnUndo.setEnabled(!undoStack.isEmpty());
     }
 
     /**
-     * Registers the global Ctrl-Z key binding on the JFrame root pane.
-     * Called once after the frame is fully constructed.
+     * Registers the global Ctrl-Z and Ctrl-Y key bindings.
      */
     private void registerUndoKeyBinding() {
         javax.swing.InputMap im = getRootPane().getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -772,6 +988,15 @@ public class GraphitizerApp extends JFrame {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
                 undo();
+            }
+        });
+        
+        im.put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Y,
+                java.awt.event.InputEvent.CTRL_DOWN_MASK), "globalRedo");
+        am.put("globalRedo", new javax.swing.AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                redo();
             }
         });
     }
@@ -1261,14 +1486,84 @@ public class GraphitizerApp extends JFrame {
         return bimage;
     }
 
-    private String buildCsvData() {
+    private void clearSelectedOrAll() {
+        if (activeDataset == null) return;
+        
+        int[] selectedRows = table.getSelectedRows();
+        boolean hasSelection = selectedRows.length > 0;
+        
+        if (!hasSelection && activeDataset.getPoints().isEmpty()) {
+            return;
+        }
+        
+        // Push full state to undo stack before deleting points
+        pushUndo(activeDataset);
+        
+        if (hasSelection) {
+            // Remove backwards by index so we don't shift elements down mid-loop
+            for (int i = selectedRows.length - 1; i >= 0; i--) {
+                int rowIndex = selectedRows[i];
+                if (rowIndex >= 0 && rowIndex < activeDataset.getPoints().size()) {
+                    activeDataset.getPoints().remove(rowIndex);
+                }
+            }
+        } else {
+            // No selection -> standard clear all
+            activeDataset.getPoints().clear();
+        }
+        
+        refreshTable();
+        if (imageCanvas != null) imageCanvas.repaint();
+    }
+
+    private String buildCsvData(boolean onlySelected) {
         StringBuilder sb = new StringBuilder();
         sb.append("Curve,X,Y\n");
         boolean anyData = false;
         
         boolean isRawPixels = plotAreaCombo != null && "Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem());
 
-        for (Dataset ds : datasets) {
+        if (onlySelected && activeDataset != null) {
+            // Export ONLY the selected rows from the ACTIVE dataset
+            if (activeDataset.getPixX1() != null && activeDataset.getPixX2() != null && activeDataset.getPixY1() != null && activeDataset.getPixY2() != null) {
+                try {
+                    double realX1 = activeDataset.getRealX1() != null ? activeDataset.getRealX1() : Double.parseDouble(txtRealX1.getText());
+                    double realX2 = activeDataset.getRealX2() != null ? activeDataset.getRealX2() : Double.parseDouble(txtRealX2.getText());
+                    double realY1 = activeDataset.getRealY1() != null ? activeDataset.getRealY1() : Double.parseDouble(txtRealY1.getText());
+                    double realY2 = activeDataset.getRealY2() != null ? activeDataset.getRealY2() : Double.parseDouble(txtRealY2.getText());
+
+                    int[] selectedRows = table.getSelectedRows();
+                    java.util.List<java.awt.geom.Point2D.Double> points = activeDataset.getPoints();
+                    
+                    for (int rowIndex : selectedRows) {
+                        if (rowIndex >= 0 && rowIndex < points.size()) {
+                            java.awt.geom.Point2D.Double p = points.get(rowIndex);
+                            double plotX = calculateCoordinate(realX1, realX2, activeDataset.getPixX1(), activeDataset.getPixX2(), p.x, chkLogX.isSelected(), "X");
+                            double plotY = calculateCoordinate(realY1, realY2, activeDataset.getPixY1(), activeDataset.getPixY2(), p.y, chkLogY.isSelected(), "Y");
+                            
+                            if (isRawPixels) {
+                                plotX = Math.round(plotX);
+                                plotY = Math.round(plotY);
+                            }
+                            
+                            sb.append(activeDataset.getName()).append(",");
+                            if (isRawPixels) {
+                                sb.append((long)plotX).append(",");
+                                sb.append((long)plotY).append("\n");
+                            } else {
+                                sb.append(plotX).append(",");
+                                sb.append(plotY).append("\n");
+                            }
+                            anyData = true;
+                        }
+                    }
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(this, "Calibration bounds error exporting selected data from curve: " + activeDataset.getName());
+                }
+            }
+        } else {
+            // Export ALL datasets normally
+            for (Dataset ds : datasets) {
             if (ds.getPixX1() != null && ds.getPixX2() != null && ds.getPixY1() != null && ds.getPixY2() != null) {
                 try {
                     // Extract curve-specific real max/min if they exist, else fallback
@@ -1303,6 +1598,7 @@ public class GraphitizerApp extends JFrame {
                 }
             }
         }
+        }
 
         if (!anyData) {
             JOptionPane.showMessageDialog(this, "No valid data to export.");
@@ -1313,7 +1609,8 @@ public class GraphitizerApp extends JFrame {
     }
 
     private void copyData(ActionEvent e) {
-        String csvData = buildCsvData();
+        boolean onlySelected = table != null && table.getSelectedRowCount() > 0;
+        String csvData = buildCsvData(onlySelected);
         if (csvData != null) {
             StringSelection selection = new StringSelection(csvData);
             Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
@@ -1323,7 +1620,8 @@ public class GraphitizerApp extends JFrame {
     }
 
     private void saveDataAs(ActionEvent e) {
-        String csvData = buildCsvData();
+        boolean onlySelected = table != null && table.getSelectedRowCount() > 0;
+        String csvData = buildCsvData(onlySelected);
         if (csvData == null)
             return;
 

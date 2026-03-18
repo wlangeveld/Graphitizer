@@ -39,6 +39,7 @@ public class ImageCanvas extends JPanel {
         PICK_TR, ZOOMED_TR,
         PICK_BR, ZOOMED_BR,
         PICK_BL, ZOOMED_BL,
+        PICK_KEYSTONE_MULTI, ZOOMED_KEYSTONE_MULTI,
         DRAG_ROI, DRAG_ROI_HANDLE, DRAG_ROI_MOVE
     }
 
@@ -241,6 +242,9 @@ public class ImageCanvas extends JPanel {
                                 break;
                             case PICK_BL:
                                 state = State.ZOOMED_BL;
+                                break;
+                            case PICK_KEYSTONE_MULTI:
+                                state = State.ZOOMED_KEYSTONE_MULTI;
                                 break;
                             default:
                                 break;
@@ -578,14 +582,15 @@ public class ImageCanvas extends JPanel {
     private boolean isIdle() {
         return state == State.IDLE || state == State.PICK_X1 || state == State.PICK_X2 || state == State.PICK_Y1
                 || state == State.PICK_Y2 || state == State.PICK_TL || state == State.PICK_TR
-                || state == State.PICK_BR || state == State.PICK_BL || state == State.DRAG_ROI;
+                || state == State.PICK_BR || state == State.PICK_BL || state == State.PICK_KEYSTONE_MULTI 
+                || state == State.DRAG_ROI;
     }
 
     private boolean isZoomed() {
         return state == State.ZOOMED_IN || state == State.EDIT_ZOOMED_IN || state == State.ZOOMED_X1
                 || state == State.ZOOMED_X2 || state == State.ZOOMED_Y1 || state == State.ZOOMED_Y2
                 || state == State.ZOOMED_TL || state == State.ZOOMED_TR || state == State.ZOOMED_BR
-                || state == State.ZOOMED_BL;
+                || state == State.ZOOMED_BL || state == State.ZOOMED_KEYSTONE_MULTI;
     }
 
     public void setState(State state) {
