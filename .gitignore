@@ -35,8 +35,10 @@ Picture 4.jfif
 Picture1.png
 Picture2.png
 Picture3.jpg
-*.ps1
 Todo.txt
+
+# Ignored build artifacts
+*.zip
 
 # Local tools and agent configs
 apache-maven-*/
