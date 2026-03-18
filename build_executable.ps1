@@ -21,7 +21,7 @@ if (Test-Path "release") {
 }
 
 Write-Host "Building native executable with jpackage..." -ForegroundColor Cyan
-jpackage --type app-image --name "Graphitizer 1.0" --input target --main-jar graphitizer-1.0-SNAPSHOT.jar --dest release --icon src/main/resources/icon.ico
+jpackage --type app-image --name "Graphitizer 1.1" --input target --main-jar graphitizer-1.1-SNAPSHOT.jar --dest release --icon src/main/resources/icon.ico
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "jpackage build failed!" -ForegroundColor Red
