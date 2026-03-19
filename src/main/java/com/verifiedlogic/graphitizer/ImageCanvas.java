@@ -684,20 +684,31 @@ public class ImageCanvas extends JPanel {
                 "Welcome to Graphitizer!",
                 "",
                 "1. Load Image: Use 'Open Image' or 'Paste from Clipboard' to load a graph.",
-                "2. Prep Image (Optional): Use 'Keystone Correction' to flatten skewed photos, or",
-                "   'Rectangular ROI' to constrain the tracing area.",
+                "2. Plot Area Setup:",
+                "    - 'Keystone Correction' to flatten skewed photos, or",
+                "    - 'Rectangular ROI' to constrain the tracing area, or",
+                "    - 'Raw Pixel Coordinates' to add points in pixel coordinates.",
                 "3. Calibration: Set your Real Coordinates on the left, then use the 'Set' buttons.",
-                "   - Click near a point (magnifier appears), then click exactly to set it.",
-                "4. Plotting Data: Click the canvas to drop points on the active curve.",
-                "   - Drag an existing point to move it. Press ESC or Right-click to abort.",
-                "   - Hover and press DEL/Backspace, or Right-click a point to delete it.",
-                "   - Use Ctrl + Mouse Wheel to zoom the canvas view.",
-                "5. Tracing: Use 'Find Similar Points' or 'Trace This Line' for fast plotting.",
-                "6. Multiple Curves: Click the '+' button to add curves (and inherit calibrations).",
+                "    - Two-click method: 1. Click near a point. A magnifier appears. 2. Click again", 
+                "      to select the point with precision.",
+                "4. Selecting Data: Two-Click the image to add points to the active curve.",
+                "    - Click an existing point to remove it, then put it in the right place.",
+                "      Press ESC or right-click to abort.",
+                "    - Hover over a point and press DEL/Backspace or right-click a point to delete it.",
+                "    - Use Ctrl + Mouse Wheel to zoom into or out of the image.",
+                "5. Point Mode/Line Mode: After adding the first point, use 'Find Similar Points' or",
+                "    'Trace This Line' in the top toolbar for automated point selection.",
+                "    Use the sliders to change the tolerance (Point Mode) or spacing (Line Mode).",
+                "6. Multiple Curves: Click the '+' button to add curves (and inherit or set new",
+                "    calibrations).",
                 "7. Export: Your data is recorded on the right. Copy or Save as CSV when done.",
-                "   - Use the 'Sort Data' dropdown to automatically order points by X or Y.",
+                "    - Use the 'Sort Data' dropdown to automatically order points by X or Y.",
+                "    - Select rows of data and Clear/Copy/Paste will only affects those. ctrl + A",
+                "      selects all.",
+                "    - Undo and Redo (ctrl + Z and ctrl + Y)",
                 "",
-                "Authors: Gemini 3.1 and Willy Langeveld"
+                "Authors: Gemini 3.1 and Willy Langeveld.",
+                "Distributed under the GNU General Public License. See Help for details."
         };
 
         FontMetrics fm = g2.getFontMetrics();
@@ -714,7 +725,7 @@ public class ImageCanvas extends JPanel {
             int startX = (getWidth() - textWidth) / 2;
             if (startX < 20)
                 startX = 20;
-            g2.drawString(text, startX, startY + (i * lineHeight));
+            g2.drawString(text, 20, startY + (i * lineHeight));
         }
     }
 

@@ -89,9 +89,10 @@ public class GraphitizerApp extends JFrame {
     private java.util.Deque<UndoItem> undoStack = new java.util.ArrayDeque<>();
     private java.util.Deque<UndoItem> redoStack = new java.util.ArrayDeque<>();
     private JButton btnUndo;
+    private JButton btnRedo;
 
     public GraphitizerApp() {
-        setTitle("Graphitizer v1.1");
+        setTitle("Graphitizer v1.2");
         try {
             java.awt.Image appIcon = javax.imageio.ImageIO.read(getClass().getResource("/icon.png"));
             setIconImage(appIcon);
@@ -156,7 +157,9 @@ public class GraphitizerApp extends JFrame {
         activeDataset = new Dataset("Curve 1", CURVE_COLORS[0]);
         datasets.add(activeDataset);
         curveCombo = new JComboBox<>();
+        styleComboBox(curveCombo);
         curveCombo.addItem(activeDataset);
+        curveCombo.setPreferredSize(new Dimension(70, 28));
 
         JButton newCurveBtn = new JButton("+");
         newCurveBtn.setFocusPainted(false);
@@ -169,6 +172,13 @@ public class GraphitizerApp extends JFrame {
         styleButton(clearBtn);
         clearBtn.setForeground(new Color(220, 50, 50)); // Modern red
 
+        JButton btnHelp = new JButton("Help");
+        styleButton(btnHelp);
+        btnHelp.setForeground(new java.awt.Color(40, 120, 60)); // Distinct, clean green
+        btnHelp.addActionListener(e -> showHelpDialog());
+
+        toolBar.add(btnHelp);
+        toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(openBtn);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(pasteBtn);
@@ -290,6 +300,7 @@ public class GraphitizerApp extends JFrame {
 
         JPanel comboPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         plotAreaCombo = new JComboBox<>(new String[] { "None (Flat Image)", "Rectangular ROI", "Keystone Correction", "Raw Pixel Coordinates" });
+        styleComboBox(plotAreaCombo);
         comboPanel.add(new JLabel("Mode:"));
         comboPanel.add(plotAreaCombo);
         plotAreaPanel.add(comboPanel);
@@ -444,6 +455,7 @@ public class GraphitizerApp extends JFrame {
         });
 
         sortCombo = new JComboBox<>(new String[] { "Manual Sort", "Auto-Sort X", "Auto-Sort Y" });
+        styleComboBox(sortCombo);
         sortCombo.setSelectedItem("Manual Sort");
         sortCombo.addActionListener(e -> {
             autoSortData();
@@ -453,33 +465,67 @@ public class GraphitizerApp extends JFrame {
         });
 
         modeCombo = new JComboBox<>(new String[] { "Point Mode", "Line Mode" });
+        modeCombo.setPreferredSize(new Dimension(90, 0));
+        styleComboBox(modeCombo);
         modeCombo.addActionListener(e -> {
             updateToolbarButtonVisibility();
             checkWizardState();
             refreshTable();
         });
-        JPanel modePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        modePanel.add(new JLabel("Mode:"));
-        modePanel.add(modeCombo);
-        modePanel.add(sortCombo);
+        JPanel topLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+        topLeft.add(new JLabel("Mode:"));
+        topLeft.add(modeCombo);
+        topLeft.add(sortCombo);
+
+        JPanel bottomLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+        bottomLeft.add(new JLabel("Active Curve:"));
+        bottomLeft.add(curveCombo);
+        bottomLeft.add(newCurveBtn);
+        bottomLeft.add(clearBtn);
 
         btnUndo = new JButton("Undo");
         styleButton(btnUndo);
-        btnUndo.setForeground(new Color(200, 120, 0)); // Warm amber — "reverse action"
+        btnUndo.setForeground(new Color(200, 120, 0)); // Warm amber
         btnUndo.setEnabled(false);
         btnUndo.setToolTipText("Undo the last point add, delete, move, or autotrace (Ctrl+Z). Redo (Ctrl+Y)");
         btnUndo.addActionListener(e -> undo());
 
-        JPanel curvePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        curvePanel.add(new JLabel("Active Curve:"));
-        curvePanel.add(curveCombo);
-        curvePanel.add(newCurveBtn);
-        curvePanel.add(clearBtn);
-        curvePanel.add(btnUndo);
+        btnRedo = new JButton("Redo");
+        styleButton(btnRedo);
+        btnRedo.setForeground(new Color(0, 150, 200)); // Cool blue
+        btnRedo.setVisible(false);
+        btnRedo.setToolTipText("Redo the last reverted action (Ctrl+Y)");
+        btnRedo.addActionListener(e -> redo());
 
-        JPanel topOptionsPanel = new JPanel(new BorderLayout());
-        topOptionsPanel.add(modePanel, BorderLayout.NORTH);
-        topOptionsPanel.add(curvePanel, BorderLayout.CENTER);
+        JPanel topRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
+        topRight.add(btnRedo);
+
+        JPanel bottomRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
+        bottomRight.add(btnUndo);
+
+        JPanel topOptionsPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.fill = GridBagConstraints.BOTH;
+
+        // Top Left: Mode and Sort
+        gbc.gridx = 0; gbc.gridy = 0;
+        gbc.weightx = 1.0; gbc.anchor = GridBagConstraints.WEST;
+        topOptionsPanel.add(topLeft, gbc);
+
+        // Top Right: Redo
+        gbc.gridx = 1; gbc.gridy = 0;
+        gbc.weightx = 0.0; gbc.anchor = GridBagConstraints.EAST;
+        topOptionsPanel.add(topRight, gbc);
+
+        // Bottom Left: Curve, +, Clear
+        gbc.gridx = 0; gbc.gridy = 1;
+        gbc.weightx = 1.0; gbc.anchor = GridBagConstraints.WEST;
+        topOptionsPanel.add(bottomLeft, gbc);
+
+        // Bottom Right: Undo
+        gbc.gridx = 1; gbc.gridy = 1;
+        gbc.weightx = 0.0; gbc.anchor = GridBagConstraints.EAST;
+        topOptionsPanel.add(bottomRight, gbc);
 
         dataPhasePanel = new JPanel(new BorderLayout());
         dataPhasePanel.add(topOptionsPanel, BorderLayout.NORTH);
@@ -948,6 +994,9 @@ public class GraphitizerApp extends JFrame {
         btnUndo.setEnabled(true);
         if (clearRedo) {
             redoStack.clear();
+            if (btnRedo != null) {
+                btnRedo.setVisible(false);
+            }
         }
     }
 
@@ -963,6 +1012,7 @@ public class GraphitizerApp extends JFrame {
         
         item.restorePast.run();
         btnUndo.setEnabled(!undoStack.isEmpty());
+        if (btnRedo != null) btnRedo.setVisible(!redoStack.isEmpty());
     }
 
     private void redo() {
@@ -974,6 +1024,7 @@ public class GraphitizerApp extends JFrame {
         
         item.restorePast.run();
         btnUndo.setEnabled(!undoStack.isEmpty());
+        if (btnRedo != null) btnRedo.setVisible(!redoStack.isEmpty());
     }
 
     /**
@@ -1788,10 +1839,8 @@ public class GraphitizerApp extends JFrame {
                 try {
                     List<java.awt.geom.Point2D.Double> results = get();
                     if (results != null && !results.isEmpty()) {
-                        System.out.println("--- NEW LINE TRACE ARRAY OUTPUT ---");
                         List<java.awt.geom.Point2D.Double> newPoints = new ArrayList<>();
                         for (java.awt.geom.Point2D.Double p : results) {
-                            System.out.printf("Raw Trace Output: X: %.3f, Y: %.3f\n", p.x, p.y);
                             // The seed point was already added by ImageCanvas mouse click, avoid duplicate
                             if (Math.abs(p.x - startX) > 1.0 || Math.abs(p.y - startY) > 1.0) {
                                 newPoints.add(new java.awt.geom.Point2D.Double(p.x, p.y));
@@ -1896,11 +1945,100 @@ public class GraphitizerApp extends JFrame {
 
     private void styleButton(JButton btn) {
         btn.setFocusPainted(false);
-        btn.setMargin(new java.awt.Insets(4, 10, 4, 10));
+        btn.setMargin(new java.awt.Insets(4, 5, 4, 5));
         btn.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 12));
         btn.setBackground(new Color(210, 230, 255));
         btn.setOpaque(true);
         btn.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+    }
+
+    private void styleComboBox(JComboBox<?> combo) {
+        combo.setFont(new java.awt.Font("SansSerif", java.awt.Font.PLAIN, 11));
+        combo.setBackground(java.awt.Color.WHITE);
+        combo.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+        java.awt.Dimension d = combo.getPreferredSize();
+        d.height = 28;
+        combo.setPreferredSize(d);
+    }
+
+    private void showHelpDialog() {
+        JDialog helpDialog = new JDialog(this, "Graphitizer Help", false);
+        helpDialog.setSize(620, 500);
+        helpDialog.setLocationRelativeTo(this);
+
+        javax.swing.JEditorPane helpPane = new javax.swing.JEditorPane();
+        helpPane.setContentType("text/html");
+        helpPane.setEditable(false);
+        helpPane.setMargin(new java.awt.Insets(15, 15, 15, 15));
+/*
+                "6. Multiple Curves: Click the '+' button to add curves (and inherit or set new",
+                "   calibrations).",
+                "7. Export: Your data is recorded on the right. Copy or Save as CSV when done.",
+                "   - Use the 'Sort Data' dropdown to automatically order points by X or Y.",
+                "   - Select rows of data and Clear/Copy/Paste only affects those. ctrl-A selects all.",
+                "   - Undo and Redo (ctrl-Z and ctrl-Y)",
+                "",
+*/
+                String helpHtml = "<html><body style='font-family: SansSerif; font-size: 13px;'>" +
+                "<h2 style='color: #2c3e50;'>Graphitizer Usage Guide</h2>" +
+                "<p>Welcome to Graphitizer! This tool extracts data points from graph and plot images.</p>" +
+                "<ul>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Open Image / Paste from Clipboard</b>: Load a new image from disk or paste directly from the clipboard.</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Plot Area Setup</b>: Set up the plot area:" +
+                "  <ul>" +
+                "    <li><i>None (Flat Image)</i>: Use the entire image as-is.</li>" +
+                "    <li><i>Rectangular ROI</i>: Restricts operations to a rectangular boundary you draw.</li>" +
+                "    <li><i>Keystone Correction</i>: Warps and corrects skewed perspective and/or camera distortion through four slected corner points.</li>" +
+                "    <li><i>Raw Pixel Coordinates</i>: Bypasses axis calibration entirely to emit raw X/Y pixel coordinates.</li>" +
+                "  </ul>" +
+                "</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Two-Click Method:</b> 1. Click near a point -> a magnifier appears. 2. Click again to select the point with precision.</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Axis Calibration</b>: Set real-world coordinates for the X and Y axes, then click <b>Set X1, X2, Y1</b>, or <b>Y2</b> and two-click the corresponding calibration point in the image. Do this for all four calibration points.</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Selecting Points</b>: Two-Click the image to add points to the active curve." +
+                "  <ul>" +
+                "   <li><i>Moving a point</i>: Clicking an existing point removes it - click again to put it in the right place. Press <i>ESC</i> or right-click to abort.</li>" +
+                "   <li><i>Deleting a point</i>: Hover over a point and press <i>DEL/Backspace</i>, or right-click the point to delete it.</li>" +
+                "   <li><i>Zoom/Pan</i>: Use <i>Ctrl + Mouse Wheel</i> to zoom into and out of the image.</li>" +
+                "  </ul>" +
+                "</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Modes</b>:" +
+                "  <ul>" +
+                "    <li><i>Point Mode</i>: Add one or more points manually. Once a point is added, the <b>Find Similar Points</b> button and <b>Tolerance</b> slider appear at the top to automatically map matching markers across the image.</li>" +
+                "    <li><i>Line Mode</i>: Add one or more points manually. Once a point is added, the <b>Trace This Line</b> button and <b>Step Size</b> slider appear at the top to automatically add points to the current dataset by tracing continuous line segments, with the slider setting the pixel distance between each point.</li>" +
+                "    <li><i>Manual Sort</i>: Points are sorted in the order they were added.</li>" +
+                "    <li><i>Auto-Sort X/Y</i>: Automatically sort points by X or Y value.</li>" +
+                "  </ul>" +
+                "</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Curves</b>: Create independent curves using the <b>+</b> button. Change between curves via the dropdown. Each curve can have a different calibration.</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Select Data Rows</b>: When data rows are selected, <b>Clear</b>, <i>DEL/Backspace</i>, <b>Copy Data to ClipBoard</b> and <b>Save Data As...</b> only work on the selected rows." +
+                "  <ul>" +
+                "    <li><i>ctrl + A</i>: Selects all rows of data in the currently selected curve. If all are selected, unselects them.</li>" +
+                "  </ul>" +
+                "</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Undo/Redo</b>: <b>Undo</b> (also <i>ctrl + Z</i>) the last point operation, and <b>Redo</b> (also <i>ctrl + Y</i>) if available.</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Authors</b>: Gemini 3.1, Willy Langeveld. <br><br>" +
+                "<i> Copyright (C) 2026 Willem Langeveld<br><br>" +
+                " This program is free software: you can redistribute it and/or modify" +
+                " it under the terms of the GNU General Public License as published by" +
+                " the Free Software Foundation, either version 3 of the License, or" +
+                " (at your option) any later version.<br><br>" +
+                " This program is distributed in the hope that it will be useful," +
+                " but WITHOUT ANY WARRANTY; without even the implied warranty of" +
+                " MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the" +
+                " GNU General Public License for more details.<br><br>" +
+                " You should have received a copy of the GNU General Public License" +
+                " along with this program.  If not, see &lt;https://www.gnu.org/licenses/&gt;.</i>" +
+                " </li>" +
+                "</ul>" +
+                "</body></html>";
+        helpPane.setText(helpHtml);
+        helpPane.setCaretPosition(0);
+
+        JScrollPane scrollPane = new JScrollPane(helpPane);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+
+        helpDialog.add(scrollPane);
+        helpDialog.setVisible(true);
     }
 
     public static void main(String[] args) {

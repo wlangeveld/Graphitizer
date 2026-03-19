@@ -1,3 +1,11 @@
+# Graphitizer 1.2
+
+## Changes in Version 1.2
+*   **Comprehensive Help Documentation:** Added a completely new overarching Help Dialog detailing nuanced operation instructions (Keystone operations, UI layout mapping, keyboard shortcuts).
+*   **Redo Logic Extraction:** The UI dynamic Redo mapping structurally scaled natively inside a Java GridBagLayout replacing the unstable generic flow mapping.
+
+---
+
 # Graphitizer 1.1
 
 ## Changes in Version 1.1
