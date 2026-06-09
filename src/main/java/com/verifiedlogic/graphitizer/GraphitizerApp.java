@@ -67,7 +67,7 @@ public class GraphitizerApp extends JFrame {
     private JComboBox<String> plotAreaCombo;
 
     // Keystone Buttons
-    private JButton btnTL, btnTR, btnBR, btnBL, btnApplyKeystone;
+    private JButton btnTL, btnTR, btnBR, btnBL, btnApplyKeystone, btnSaveCorrectedImage;
     private JButton btnX1, btnX2, btnY1, btnY2;
     private JPanel keystoneGrid;
     private static final Color[] CURVE_COLORS = { Color.RED, Color.BLUE, Color.GREEN, new Color(255, 128, 0),
@@ -332,6 +332,15 @@ public class GraphitizerApp extends JFrame {
 
         plotAreaPanel.add(keystoneGrid);
         plotAreaPanel.add(applyWarpPanel);
+
+        btnSaveCorrectedImage = new JButton("Save Corrected Image As...");
+        styleButton(btnSaveCorrectedImage);
+        btnSaveCorrectedImage.setVisible(false);
+        btnSaveCorrectedImage.addActionListener(e -> saveCorrectedImage());
+        
+        JPanel saveCorrectedPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        saveCorrectedPanel.add(btnSaveCorrectedImage);
+        plotAreaPanel.add(saveCorrectedPanel);
 
         // NEW: ROI Controls (Instruction only, interaction is drag-based)
         JPanel roiPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
@@ -814,6 +823,7 @@ public class GraphitizerApp extends JFrame {
             if (warped != null) {
                 loadedImage = warped;
                 imageCanvas.setImage(loadedImage);
+                btnSaveCorrectedImage.setVisible(true);
 
                 // Reset Wizard State & Data
                 keyTL = keyTR = keyBR = keyBL = null;
@@ -1321,6 +1331,80 @@ public class GraphitizerApp extends JFrame {
             return real1 + ratio * (real2 - real1);
         }
     }
+    private void saveCorrectedImage() {
+        if (loadedImage == null) return;
+        JFileChooser chooser = new JFileChooser();
+        
+        File settingsFile = getSettingsFile();
+        String defaultSaveDir = loadSetting(settingsFile, "DefaultSaveDir");
+        if (defaultSaveDir != null && !defaultSaveDir.isEmpty()) {
+            File dirFile = new File(defaultSaveDir);
+            if (dirFile.exists() && dirFile.isDirectory()) {
+                chooser.setCurrentDirectory(dirFile);
+            }
+        }
+        
+        chooser.setDialogTitle("Save Corrected Image As");
+        chooser.setAcceptAllFileFilterUsed(false);
+        javax.swing.filechooser.FileNameExtensionFilter filterPng = new javax.swing.filechooser.FileNameExtensionFilter("PNG Image (*.png)", "png");
+        javax.swing.filechooser.FileNameExtensionFilter filterJpg = new javax.swing.filechooser.FileNameExtensionFilter("JPEG Image (*.jpg, *.jpeg)", "jpg", "jpeg");
+        javax.swing.filechooser.FileNameExtensionFilter filterBmp = new javax.swing.filechooser.FileNameExtensionFilter("BMP Image (*.bmp)", "bmp");
+        javax.swing.filechooser.FileNameExtensionFilter filterGif = new javax.swing.filechooser.FileNameExtensionFilter("GIF Image (*.gif)", "gif");
+        
+        chooser.addChoosableFileFilter(filterPng);
+        chooser.addChoosableFileFilter(filterJpg);
+        chooser.addChoosableFileFilter(filterBmp);
+        chooser.addChoosableFileFilter(filterGif);
+        chooser.setFileFilter(filterPng);
+
+        if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            File file = chooser.getSelectedFile();
+            saveSetting(settingsFile, "DefaultSaveDir", file.getParent());
+            
+            String format = "png";
+            String fileName = file.getName().toLowerCase();
+            if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) format = "jpg";
+            else if (fileName.endsWith(".png")) format = "png";
+            else if (fileName.endsWith(".bmp")) format = "bmp";
+            else if (fileName.endsWith(".gif")) format = "gif";
+            else {
+                javax.swing.filechooser.FileFilter selectedFilter = chooser.getFileFilter();
+                if (selectedFilter == filterJpg) { format = "jpg"; file = new File(file.getParentFile(), file.getName() + ".jpg"); }
+                else if (selectedFilter == filterBmp) { format = "bmp"; file = new File(file.getParentFile(), file.getName() + ".bmp"); }
+                else if (selectedFilter == filterGif) { format = "gif"; file = new File(file.getParentFile(), file.getName() + ".gif"); }
+                else { format = "png"; file = new File(file.getParentFile(), file.getName() + ".png"); }
+            }
+            
+            if (file.exists()) {
+                int overwrite = JOptionPane.showConfirmDialog(this,
+                        "File already exists. Do you want to overwrite it?",
+                        "Confirm Overwrite",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+                if (overwrite != JOptionPane.YES_OPTION) {
+                    return;
+                }
+            }
+            
+            try {
+                BufferedImage imageToSave = loadedImage;
+                if ((format.equals("jpg") || format.equals("bmp")) && imageToSave.getColorModel().hasAlpha()) {
+                    BufferedImage rgbImage = new BufferedImage(imageToSave.getWidth(), imageToSave.getHeight(), BufferedImage.TYPE_INT_RGB);
+                    Graphics2D g = rgbImage.createGraphics();
+                    g.setColor(Color.WHITE);
+                    g.fillRect(0, 0, rgbImage.getWidth(), rgbImage.getHeight());
+                    g.drawImage(imageToSave, 0, 0, null);
+                    g.dispose();
+                    imageToSave = rgbImage;
+                }
+                
+                javax.imageio.ImageIO.write(imageToSave, format, file);
+                JOptionPane.showMessageDialog(this, "Image saved successfully!");
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "Error saving image: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
 
     private void openImage(ActionEvent e) {
         if (!checkUnsavedData())
@@ -1392,6 +1476,7 @@ public class GraphitizerApp extends JFrame {
                 resetApplication(); // Reset before setting new image
                 loadedImage = img;
                 imageCanvas.setImage(loadedImage);
+                btnSaveCorrectedImage.setVisible(false);
                 // If already in Raw Pixel mode, auto-calibrate to the new image dimensions
                 applyRawPixelCalibrationIfActive();
             } else {
@@ -1451,6 +1536,7 @@ public class GraphitizerApp extends JFrame {
                 resetApplication();
                 loadedImage = toBufferedImage(img);
                 imageCanvas.setImage(loadedImage);
+                btnSaveCorrectedImage.setVisible(false);
                 // If already in Raw Pixel mode, auto-calibrate to the new image dimensions
                 applyRawPixelCalibrationIfActive();
             } catch (Exception ex) {

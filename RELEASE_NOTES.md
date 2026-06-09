@@ -1,3 +1,14 @@
+# Graphitizer 1.3
+
+## Changes in Version 1.3
+*   **Save Corrected Image:** Added a button to export the flat, keystone-corrected view of the image directly to your disk.
+*   **Advanced Image Formatting:** Automatically detects and exports graphics properly across PNG, JPEG, BMP, and GIF extensions via the file chooser.
+*   **Intelligent Overwrite Protections:** A new dialog prompts for confirmation before attempting to overwrite an existing picture.
+*   **DefaultSaveDir Integration:** The image exporter intuitively reads and writes to your internal `settings.txt` registry to keep track of your default save location, seamlessly matching the data export mechanics.
+*   **Non-Destructive Keystone Aborts:** Hitting `Escape` or `Right-Clicking` to cancel out of a zoomed-in keystone placement no longer fully resets the keystone automation state. It now cancels the active magnification and drops you right back to the previous picking state to try again without losing sequence progress!
+
+---
+
 # Graphitizer 1.2
 
 ## Changes in Version 1.2

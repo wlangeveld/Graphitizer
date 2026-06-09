@@ -252,8 +252,7 @@ public class ImageCanvas extends JPanel {
                         repaint();
                     }
                 } else if (isZoomed() && e.getButton() == MouseEvent.BUTTON3) {
-                    state = State.IDLE;
-                    repaint();
+                    cancelZoom();
                     return;
                 } else if (isZoomed() && e.getButton() == MouseEvent.BUTTON1) {
                     double finalX = originX + (e.getPoint().x - lockedScreenCenter.x) / 10.0;
@@ -479,8 +478,7 @@ public class ImageCanvas extends JPanel {
             public void keyPressed(java.awt.event.KeyEvent e) {
                 if (e.getKeyCode() == java.awt.event.KeyEvent.VK_ESCAPE) {
                     if (isZoomed()) {
-                        state = State.IDLE;
-                        repaint();
+                        cancelZoom();
                     }
                 } else if (e.getKeyCode() == java.awt.event.KeyEvent.VK_DELETE
                         || e.getKeyCode() == java.awt.event.KeyEvent.VK_BACK_SPACE) {
@@ -600,6 +598,23 @@ public class ImageCanvas extends JPanel {
 
     public State getState() {
         return this.state;
+    }
+
+    private void cancelZoom() {
+        if (!isZoomed()) return;
+        switch (state) {
+            case ZOOMED_X1: state = State.PICK_X1; break;
+            case ZOOMED_X2: state = State.PICK_X2; break;
+            case ZOOMED_Y1: state = State.PICK_Y1; break;
+            case ZOOMED_Y2: state = State.PICK_Y2; break;
+            case ZOOMED_TL: state = State.PICK_TL; break;
+            case ZOOMED_TR: state = State.PICK_TR; break;
+            case ZOOMED_BR: state = State.PICK_BR; break;
+            case ZOOMED_BL: state = State.PICK_BL; break;
+            case ZOOMED_KEYSTONE_MULTI: state = State.PICK_KEYSTONE_MULTI; break;
+            default: state = State.IDLE; break;
+        }
+        repaint();
     }
 
     private double[] getScreenCoordinates(double ix, double iy) {
