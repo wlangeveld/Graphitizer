@@ -91,8 +91,25 @@ public class GraphitizerApp extends JFrame {
     private JButton btnUndo;
     private JButton btnRedo;
 
+    private String getAppVersion() {
+        String version = "Unknown";
+        try (java.io.InputStream is = getClass().getResourceAsStream("/version.properties")) {
+            if (is != null) {
+                java.util.Properties props = new java.util.Properties();
+                props.load(is);
+                version = props.getProperty("version", "Unknown");
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        if (version.endsWith("-SNAPSHOT")) {
+            version = version.substring(0, version.length() - "-SNAPSHOT".length());
+        }
+        return version;
+    }
+
     public GraphitizerApp() {
-        setTitle("Graphitizer v1.2");
+        setTitle("Graphitizer v" + getAppVersion());
         try {
             java.awt.Image appIcon = javax.imageio.ImageIO.read(getClass().getResource("/icon.png"));
             setIconImage(appIcon);
