@@ -29,8 +29,6 @@ import java.awt.geom.Point2D;
 
 public class ImageAnalyzer {
 
-    // RGB Euclidean distance tolerance
-    private static final double COLOR_TOLERANCE = 40.0;
 
     public static List<Point2D.Double> findSimilarPoints(BufferedImage image, Point referencePixel,
             Rectangle searchBounds,
@@ -38,7 +36,7 @@ public class ImageAnalyzer {
         List<Point2D.Double> foundPoints = new ArrayList<>();
 
         // 1. Extract the template (mask) at the reference point
-        Rectangle templateBounds = extractTemplateBounds(image, referencePixel);
+        Rectangle templateBounds = extractTemplateBounds(image, referencePixel, matchThreshold);
         if (templateBounds == null) {
             return foundPoints; // Could not find a distinct blob
         }
@@ -53,7 +51,7 @@ public class ImageAnalyzer {
 
         for (int y = searchBounds.y; y <= searchMaxY; y++) {
             for (int x = searchBounds.x; x <= searchMaxX; x++) {
-                double score = calculateRMSE(image, template, x, y);
+                double score = calculateRMSE(image, template, x, y, matchThreshold);
                 if (score < matchThreshold) {
                     // Center of the match with sub-pixel 0.5 offset
                     rawMatches.add(new Point2D.Double(x + templateBounds.width / 2.0 + 0.5,
@@ -66,7 +64,7 @@ public class ImageAnalyzer {
         return applyNMS(rawMatches, Math.max(templateBounds.width, templateBounds.height));
     }
 
-    private static Rectangle extractTemplateBounds(BufferedImage image, Point start) {
+    private static Rectangle extractTemplateBounds(BufferedImage image, Point start, double colorTolerance) {
         int width = image.getWidth();
         int height = image.getHeight();
 
@@ -92,7 +90,7 @@ public class ImageAnalyzer {
 
         // Limit maximum template size to prevent analyzing half the graph as one
         // "point"
-        int MAX_BLOB_SIZE = 1000;
+        int MAX_BLOB_SIZE = 50000;
 
         while (!queue.isEmpty() && blobPixels.size() < MAX_BLOB_SIZE) {
             Point p = queue.poll();
@@ -111,7 +109,7 @@ public class ImageAnalyzer {
 
                 if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[nx][ny]) {
                     Color neighborColor = new Color(image.getRGB(nx, ny), true);
-                    if (colorDistance(targetColor, neighborColor) <= COLOR_TOLERANCE) {
+                    if (colorDistance(targetColor, neighborColor) <= colorTolerance) {
                         visited[nx][ny] = true;
                         queue.add(new Point(nx, ny));
                     }
@@ -136,13 +134,24 @@ public class ImageAnalyzer {
         return new Rectangle(minX, minY, boundWidth, boundHeight);
     }
 
-    private static double calculateRMSE(BufferedImage image, BufferedImage template, int startX, int startY) {
-        long sumSqDiff = 0;
+    private static double calculateRMSE(BufferedImage image, BufferedImage template, int startX, int startY, double matchThreshold) {
         int tw = template.getWidth();
         int th = template.getHeight();
 
-        for (int ty = 0; ty < th; ty++) {
-            for (int tx = 0; tx < tw; tx++) {
+        // Fast rejection: check the center pixel first. If it's vastly different, abort.
+        Color centerTemplate = new Color(template.getRGB(tw/2, th/2), true);
+        Color centerImage = new Color(image.getRGB(startX + tw/2, startY + th/2), true);
+        if (colorDistance(centerTemplate, centerImage) > matchThreshold * 2.0) {
+            return Double.MAX_VALUE;
+        }
+
+        long sumSqDiff = 0;
+        int stepX = Math.max(1, tw / 20);
+        int stepY = Math.max(1, th / 20);
+        int count = 0;
+
+        for (int ty = 0; ty < th; ty += stepY) {
+            for (int tx = 0; tx < tw; tx += stepX) {
                 Color c1 = new Color(template.getRGB(tx, ty), true);
                 Color c2 = new Color(image.getRGB(startX + tx, startY + ty), true);
 
@@ -151,10 +160,11 @@ public class ImageAnalyzer {
                 int db = c1.getBlue() - c2.getBlue();
 
                 sumSqDiff += (dr * dr) + (dg * dg) + (db * db);
+                count++;
             }
         }
 
-        double meanSqDiff = (double) sumSqDiff / (tw * th);
+        double meanSqDiff = (double) sumSqDiff / count;
         return Math.sqrt(meanSqDiff);
     }
 
