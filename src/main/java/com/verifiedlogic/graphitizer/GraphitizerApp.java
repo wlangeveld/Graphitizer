@@ -65,6 +65,7 @@ public class GraphitizerApp extends JFrame {
     private JComboBox<String> modeCombo;
     private JComboBox<String> sortCombo;
     private JComboBox<String> plotAreaCombo;
+    private JComboBox<String> markerShapeCombo;
 
     // Keystone Buttons
     private JButton btnTL, btnTR, btnBR, btnBL, btnApplyKeystone, btnSaveCorrectedImage;
@@ -138,6 +139,11 @@ public class GraphitizerApp extends JFrame {
         styleButton(btnFindSimilar);
         btnFindSimilar.setVisible(false);
 
+        markerShapeCombo = new JComboBox<>(new String[] { "Auto (Flood-Fill)", "Hollow Circle", "Solid Dot" });
+        markerShapeCombo.setVisible(false);
+        markerShapeCombo.setMaximumSize(new java.awt.Dimension(150, 30));
+        markerShapeCombo.setToolTipText("Select the marker shape. Use specific shapes for noisy graphs.");
+
         lblAccuracy = new JLabel(" Tolerance: ");
         lblAccuracy.setVisible(false);
         accuracySlider = new JSlider(5, 100, 30);
@@ -205,6 +211,8 @@ public class GraphitizerApp extends JFrame {
         toolBar.add(saveAsBtn);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(btnFindSimilar);
+        toolBar.add(Box.createHorizontalStrut(5));
+        toolBar.add(markerShapeCombo);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(lblAccuracy);
         toolBar.add(accuracySlider);
@@ -1267,6 +1275,7 @@ public class GraphitizerApp extends JFrame {
 
         if (btnFindSimilar != null && btnTraceLine != null) {
             btnFindSimilar.setVisible(shouldShow && !isLineMode);
+            markerShapeCombo.setVisible(shouldShow && !isLineMode);
             lblAccuracy.setVisible(shouldShow && !isLineMode);
             accuracySlider.setVisible(shouldShow && !isLineMode);
             lblAccuracyValue.setVisible(shouldShow && !isLineMode);
@@ -1838,14 +1847,16 @@ public class GraphitizerApp extends JFrame {
         }
 
         btnFindSimilar.setEnabled(false);
+        markerShapeCombo.setEnabled(false);
         accuracySlider.setEnabled(false);
         final Rectangle searchArea = bounds;
         final double matchThreshold = (double) accuracySlider.getValue();
+        final String markerShape = (String) markerShapeCombo.getSelectedItem();
 
         javax.swing.SwingWorker<List<java.awt.geom.Point2D.Double>, Void> worker = new javax.swing.SwingWorker<>() {
             @Override
             protected List<java.awt.geom.Point2D.Double> doInBackground() throws Exception {
-                return ImageAnalyzer.findSimilarPoints(loadedImage, refPixel, searchArea, matchThreshold);
+                return ImageAnalyzer.findSimilarPoints(loadedImage, refPixel, searchArea, matchThreshold, markerShape);
             }
 
             @Override
@@ -1876,6 +1887,7 @@ public class GraphitizerApp extends JFrame {
                     JOptionPane.showMessageDialog(GraphitizerApp.this, "Error scanning for points: " + ex.getMessage());
                 } finally {
                     btnFindSimilar.setEnabled(true);
+                    markerShapeCombo.setEnabled(true);
                     accuracySlider.setEnabled(true);
                 }
             }

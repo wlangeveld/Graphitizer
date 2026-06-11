@@ -32,36 +32,81 @@ public class ImageAnalyzer {
 
     public static List<Point2D.Double> findSimilarPoints(BufferedImage image, Point referencePixel,
             Rectangle searchBounds,
-            double matchThreshold) {
+            double matchThreshold, String markerShape) {
         List<Point2D.Double> foundPoints = new ArrayList<>();
 
-        // 1. Extract the template (mask) at the reference point
-        Rectangle templateBounds = extractTemplateBounds(image, referencePixel, matchThreshold);
-        if (templateBounds == null) {
-            return foundPoints; // Could not find a distinct blob
-        }
+        if ("Auto (Flood-Fill)".equals(markerShape) || markerShape == null) {
+            // 1. Extract the template (mask) at the reference point
+            Rectangle templateBounds = extractTemplateBounds(image, referencePixel, matchThreshold);
+            if (templateBounds == null) {
+                return foundPoints; // Could not find a distinct blob
+            }
 
-        BufferedImage template = image.getSubimage(templateBounds.x, templateBounds.y, templateBounds.width,
-                templateBounds.height);
+            BufferedImage template = image.getSubimage(templateBounds.x, templateBounds.y, templateBounds.width,
+                    templateBounds.height);
 
-        // 2. Scan the search bounds for matches
-        List<Point2D.Double> rawMatches = new ArrayList<>();
-        int searchMaxX = searchBounds.x + searchBounds.width - templateBounds.width;
-        int searchMaxY = searchBounds.y + searchBounds.height - templateBounds.height;
+            // 2. Scan the search bounds for matches
+            List<Point2D.Double> rawMatches = new ArrayList<>();
+            int searchMaxX = searchBounds.x + searchBounds.width - templateBounds.width;
+            int searchMaxY = searchBounds.y + searchBounds.height - templateBounds.height;
 
-        for (int y = searchBounds.y; y <= searchMaxY; y++) {
-            for (int x = searchBounds.x; x <= searchMaxX; x++) {
-                double score = calculateRMSE(image, template, x, y, matchThreshold);
-                if (score < matchThreshold) {
-                    // Center of the match with sub-pixel 0.5 offset
-                    rawMatches.add(new Point2D.Double(x + templateBounds.width / 2.0 + 0.5,
-                            y + templateBounds.height / 2.0 + 0.5));
+            for (int y = searchBounds.y; y <= searchMaxY; y++) {
+                for (int x = searchBounds.x; x <= searchMaxX; x++) {
+                    double score = calculateRMSE(image, template, x, y, matchThreshold);
+                    if (score < matchThreshold) {
+                        // Center of the match with sub-pixel 0.5 offset
+                        rawMatches.add(new Point2D.Double(x + templateBounds.width / 2.0 + 0.5,
+                                y + templateBounds.height / 2.0 + 0.5));
+                    }
                 }
             }
-        }
 
-        // 3. Apply Non-Maximum Suppression (NMS) to remove overlapping duplicates
-        return applyNMS(rawMatches, Math.max(templateBounds.width, templateBounds.height));
+            // 3. Apply Non-Maximum Suppression (NMS) to remove overlapping duplicates
+            return applyNMS(rawMatches, Math.max(templateBounds.width, templateBounds.height));
+        } else {
+            // SYNTHETIC TEMPLATE NCC MATCHING
+            double radius = estimateRadius(image, referencePixel);
+            if (radius <= 0) return foundPoints;
+            
+            int size = (int)Math.ceil(radius * 2) + 4;
+            double[][] syntheticTemplate = generateSyntheticTemplate(markerShape, size, radius);
+            if (syntheticTemplate == null) return foundPoints;
+
+            // Map Accuracy Slider (5 strict to 100 loose) to NCC (0.95 strict to 0.50 loose)
+            double nccThreshold = 0.5 + 0.45 * Math.exp(-(matchThreshold - 5.0) / 40.0);
+
+            List<Point2D.Double> rawMatches = new ArrayList<>();
+            int searchMaxX = searchBounds.x + searchBounds.width - size;
+            int searchMaxY = searchBounds.y + searchBounds.height - size;
+
+            // Precompute template stats
+            double tMean = 0;
+            for (int ty=0; ty<size; ty++) {
+                for (int tx=0; tx<size; tx++) {
+                    tMean += syntheticTemplate[tx][ty];
+                }
+            }
+            tMean /= (size*size);
+            
+            double tVar = 0;
+            for (int ty=0; ty<size; ty++) {
+                for (int tx=0; tx<size; tx++) {
+                    double d = syntheticTemplate[tx][ty] - tMean;
+                    tVar += d*d;
+                }
+            }
+
+            for (int y = searchBounds.y; y <= searchMaxY; y++) {
+                for (int x = searchBounds.x; x <= searchMaxX; x++) {
+                    double ncc = calculateNCC(image, syntheticTemplate, tMean, tVar, x, y);
+                    if (ncc >= nccThreshold) {
+                        rawMatches.add(new Point2D.Double(x + size / 2.0, y + size / 2.0));
+                    }
+                }
+            }
+
+            return applyNMS(rawMatches, (int) (radius * 1.5));
+        }
     }
 
     private static Rectangle extractTemplateBounds(BufferedImage image, Point start, double colorTolerance) {
@@ -166,6 +211,90 @@ public class ImageAnalyzer {
 
         double meanSqDiff = (double) sumSqDiff / count;
         return Math.sqrt(meanSqDiff);
+    }
+
+    private static double estimateRadius(BufferedImage image, Point center) {
+        int targetRGB = image.getRGB(center.x, center.y);
+        Color targetColor = new Color(targetRGB, true);
+        
+        int r = 1;
+        while (r < 50) {
+            int cx = center.x + r;
+            if (cx < image.getWidth()) {
+                Color c = new Color(image.getRGB(cx, center.y), true);
+                if (colorDistance(targetColor, c) > 40.0) {
+                    break;
+                }
+            }
+            r++;
+        }
+        
+        // Return a reasonable radius even if it hit an edge immediately, but bound it
+        return Math.max(3.0, Math.min(25.0, (double)r));
+    }
+
+    private static double[][] generateSyntheticTemplate(String shape, int size, double radius) {
+        double[][] template = new double[size][size];
+        
+        double thickness = Math.max(1.0, radius * 0.2); // For hollow circles
+        
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                double cx = x - size / 2.0 + 0.5;
+                double cy = y - size / 2.0 + 0.5;
+                double dist = Math.sqrt(cx*cx + cy*cy);
+                
+                if ("Hollow Circle".equals(shape)) {
+                    if (Math.abs(dist - radius) <= thickness) {
+                        template[x][y] = 1.0;
+                    } else {
+                        template[x][y] = 0.0;
+                    }
+                } else if ("Solid Dot".equals(shape)) {
+                    if (dist <= radius) {
+                        template[x][y] = 1.0;
+                    } else {
+                        template[x][y] = 0.0;
+                    }
+                }
+            }
+        }
+        return template;
+    }
+
+    private static double calculateNCC(BufferedImage image, double[][] template, double tMean, double tVar, int startX, int startY) {
+        int size = template.length;
+        if (tVar == 0) return 0.0;
+        
+        double patchMean = 0;
+        for (int ty = 0; ty < size; ty++) {
+            for (int tx = 0; tx < size; tx++) {
+                Color c = new Color(image.getRGB(startX + tx, startY + ty), true);
+                // Invert grayscale so dark pixels = high value (like the template where 1.0 = dark marker)
+                double intensity = 1.0 - (c.getRed() + c.getGreen() + c.getBlue()) / (3.0 * 255.0);
+                patchMean += intensity;
+            }
+        }
+        patchMean /= (size * size);
+        
+        double nccNum = 0;
+        double patchVar = 0;
+        
+        for (int ty = 0; ty < size; ty++) {
+            for (int tx = 0; tx < size; tx++) {
+                Color c = new Color(image.getRGB(startX + tx, startY + ty), true);
+                double intensity = 1.0 - (c.getRed() + c.getGreen() + c.getBlue()) / (3.0 * 255.0);
+                
+                double tDiff = template[tx][ty] - tMean;
+                double pDiff = intensity - patchMean;
+                
+                nccNum += tDiff * pDiff;
+                patchVar += pDiff * pDiff;
+            }
+        }
+        
+        if (patchVar == 0) return 0.0;
+        return nccNum / Math.sqrt(tVar * patchVar);
     }
 
     private static double colorDistance(Color c1, Color c2) {
