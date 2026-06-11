@@ -207,21 +207,25 @@ public class ImageAnalyzer {
         Color markerColor = clickColor;
 
         if ("Hollow Circle".equals(shape)) {
-            // Try to find the ring color if they clicked the white center
-            boolean hitRing = false;
-            for (int r = 1; r < 30; r++) {
-                int cx = clickPoint.x + r;
-                if (cx < image.getWidth()) {
-                    Color c = new Color(image.getRGB(cx, clickPoint.y), true);
-                    if (colorDistance(clickColor, c) > 40.0) {
-                        markerColor = c;
-                        hitRing = true;
-                        break;
+            // Find the true marker color by averaging all non-background pixels in a local window
+            int rSum = 0, gSum = 0, bSum = 0, count = 0;
+            for (int dy = -15; dy <= 15; dy++) {
+                for (int dx = -15; dx <= 15; dx++) {
+                    int cx = clickPoint.x + dx;
+                    int cy = clickPoint.y + dy;
+                    if (cx >= 0 && cy >= 0 && cx < image.getWidth() && cy < image.getHeight()) {
+                        Color c = new Color(image.getRGB(cx, cy), true);
+                        if (colorDistance(clickColor, c) > 60.0) { // Definitely not the background
+                            rSum += c.getRed();
+                            gSum += c.getGreen();
+                            bSum += c.getBlue();
+                            count++;
+                        }
                     }
                 }
             }
-            if (!hitRing) {
-                markerColor = clickColor;
+            if (count > 0) {
+                markerColor = new Color(rSum / count, gSum / count, bSum / count);
             }
         }
 
@@ -229,14 +233,9 @@ public class ImageAnalyzer {
         double bestScore = -1.0;
 
         int searchWin = 15;
-        int minX = Math.max(0, clickPoint.x - searchWin);
-        int maxX = Math.min(image.getWidth() - 1, clickPoint.x + searchWin);
-        int minY = Math.max(0, clickPoint.y - searchWin);
-        int maxY = Math.min(image.getHeight() - 1, clickPoint.y + searchWin);
 
         for (int r = 3; r <= 20; r++) {
             int size = r * 2 + 6;
-            if (minX > maxX - size || minY > maxY - size) continue;
 
             double[][] temp = generateSyntheticTemplate(shape, size, r);
             double tMean = 0, tVar = 0;
@@ -256,14 +255,21 @@ public class ImageAnalyzer {
 
             if (tVar == 0) continue;
 
-            for (int y = minY; y <= maxY - size; y++) {
-                for (int x = minX; x <= maxX - size; x++) {
-                    double ncc = calculateColorNCC(image, temp, tMean, tVar, x, y, markerColor);
+            for (int dy = -searchWin; dy <= searchWin; dy++) {
+                for (int dx = -searchWin; dx <= searchWin; dx++) {
+                    int cx = clickPoint.x + dx;
+                    int cy = clickPoint.y + dy;
+                    int startX = cx - size / 2;
+                    int startY = cy - size / 2;
+                    
+                    if (startX < 0 || startY < 0 || startX + size > image.getWidth() || startY + size > image.getHeight()) continue;
+
+                    double ncc = calculateColorNCC(image, temp, tMean, tVar, startX, startY, markerColor);
                     if (ncc > bestScore) {
                         bestScore = ncc;
                         best = new CalibrationResult();
                         best.radius = r;
-                        best.center = new Point(x + size / 2, y + size / 2);
+                        best.center = new Point(cx, cy);
                         best.markerColor = markerColor;
                         best.template = temp;
                         best.tMean = tMean;
