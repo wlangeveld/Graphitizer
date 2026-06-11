@@ -65,47 +65,27 @@ public class ImageAnalyzer {
             return applyNMS(rawMatches, Math.max(templateBounds.width, templateBounds.height));
         } else {
             // SYNTHETIC TEMPLATE NCC MATCHING
-            double radius = estimateRadius(image, referencePixel);
-            if (radius <= 0) return foundPoints;
-            
-            int size = (int)Math.ceil(radius * 2) + 4;
-            double[][] syntheticTemplate = generateSyntheticTemplate(markerShape, size, radius);
-            if (syntheticTemplate == null) return foundPoints;
+            CalibrationResult calib = calibrateTemplate(image, referencePixel, markerShape);
+            if (calib == null) return foundPoints;
 
             // Map Accuracy Slider (5 strict to 100 loose) to NCC (0.95 strict to 0.50 loose)
             double nccThreshold = 0.5 + 0.45 * Math.exp(-(matchThreshold - 5.0) / 40.0);
 
             List<Point2D.Double> rawMatches = new ArrayList<>();
+            int size = calib.template.length;
             int searchMaxX = searchBounds.x + searchBounds.width - size;
             int searchMaxY = searchBounds.y + searchBounds.height - size;
 
-            // Precompute template stats
-            double tMean = 0;
-            for (int ty=0; ty<size; ty++) {
-                for (int tx=0; tx<size; tx++) {
-                    tMean += syntheticTemplate[tx][ty];
-                }
-            }
-            tMean /= (size*size);
-            
-            double tVar = 0;
-            for (int ty=0; ty<size; ty++) {
-                for (int tx=0; tx<size; tx++) {
-                    double d = syntheticTemplate[tx][ty] - tMean;
-                    tVar += d*d;
-                }
-            }
-
             for (int y = searchBounds.y; y <= searchMaxY; y++) {
                 for (int x = searchBounds.x; x <= searchMaxX; x++) {
-                    double ncc = calculateNCC(image, syntheticTemplate, tMean, tVar, x, y);
+                    double ncc = calculateColorNCC(image, calib.template, calib.tMean, calib.tVar, x, y, calib.markerColor);
                     if (ncc >= nccThreshold) {
                         rawMatches.add(new Point2D.Double(x + size / 2.0, y + size / 2.0));
                     }
                 }
             }
 
-            return applyNMS(rawMatches, (int) (radius * 1.5));
+            return applyNMS(rawMatches, (int) (calib.radius * 1.5));
         }
     }
 
@@ -135,7 +115,7 @@ public class ImageAnalyzer {
 
         // Limit maximum template size to prevent analyzing half the graph as one
         // "point"
-        int MAX_BLOB_SIZE = 50000;
+        int MAX_BLOB_SIZE = 5000;
 
         while (!queue.isEmpty() && blobPixels.size() < MAX_BLOB_SIZE) {
             Point p = queue.poll();
@@ -213,24 +193,90 @@ public class ImageAnalyzer {
         return Math.sqrt(meanSqDiff);
     }
 
-    private static double estimateRadius(BufferedImage image, Point center) {
-        int targetRGB = image.getRGB(center.x, center.y);
-        Color targetColor = new Color(targetRGB, true);
-        
-        int r = 1;
-        while (r < 50) {
-            int cx = center.x + r;
-            if (cx < image.getWidth()) {
-                Color c = new Color(image.getRGB(cx, center.y), true);
-                if (colorDistance(targetColor, c) > 40.0) {
-                    break;
+    private static class CalibrationResult {
+        double radius;
+        Point center;
+        Color markerColor;
+        double[][] template;
+        double tMean;
+        double tVar;
+    }
+
+    private static CalibrationResult calibrateTemplate(BufferedImage image, Point clickPoint, String shape) {
+        Color clickColor = new Color(image.getRGB(clickPoint.x, clickPoint.y), true);
+        Color markerColor = clickColor;
+
+        if ("Hollow Circle".equals(shape)) {
+            // Try to find the ring color if they clicked the white center
+            boolean hitRing = false;
+            for (int r = 1; r < 30; r++) {
+                int cx = clickPoint.x + r;
+                if (cx < image.getWidth()) {
+                    Color c = new Color(image.getRGB(cx, clickPoint.y), true);
+                    if (colorDistance(clickColor, c) > 40.0) {
+                        markerColor = c;
+                        hitRing = true;
+                        break;
+                    }
                 }
             }
-            r++;
+            if (!hitRing) {
+                markerColor = clickColor;
+            }
         }
-        
-        // Return a reasonable radius even if it hit an edge immediately, but bound it
-        return Math.max(3.0, Math.min(25.0, (double)r));
+
+        CalibrationResult best = null;
+        double bestScore = -1.0;
+
+        int searchWin = 15;
+        int minX = Math.max(0, clickPoint.x - searchWin);
+        int maxX = Math.min(image.getWidth() - 1, clickPoint.x + searchWin);
+        int minY = Math.max(0, clickPoint.y - searchWin);
+        int maxY = Math.min(image.getHeight() - 1, clickPoint.y + searchWin);
+
+        for (int r = 3; r <= 20; r++) {
+            int size = r * 2 + 6;
+            if (minX > maxX - size || minY > maxY - size) continue;
+
+            double[][] temp = generateSyntheticTemplate(shape, size, r);
+            double tMean = 0, tVar = 0;
+            for (int ty = 0; ty < size; ty++) {
+                for (int tx = 0; tx < size; tx++) {
+                    tMean += temp[tx][ty];
+                }
+            }
+            tMean /= (size * size);
+            
+            for (int ty = 0; ty < size; ty++) {
+                for (int tx = 0; tx < size; tx++) {
+                    double d = temp[tx][ty] - tMean;
+                    tVar += d * d;
+                }
+            }
+
+            if (tVar == 0) continue;
+
+            for (int y = minY; y <= maxY - size; y++) {
+                for (int x = minX; x <= maxX - size; x++) {
+                    double ncc = calculateColorNCC(image, temp, tMean, tVar, x, y, markerColor);
+                    if (ncc > bestScore) {
+                        bestScore = ncc;
+                        best = new CalibrationResult();
+                        best.radius = r;
+                        best.center = new Point(x + size / 2, y + size / 2);
+                        best.markerColor = markerColor;
+                        best.template = temp;
+                        best.tMean = tMean;
+                        best.tVar = tVar;
+                    }
+                }
+            }
+        }
+
+        if (bestScore > 0.4) {
+            return best;
+        }
+        return null;
     }
 
     private static double[][] generateSyntheticTemplate(String shape, int size, double radius) {
@@ -262,7 +308,7 @@ public class ImageAnalyzer {
         return template;
     }
 
-    private static double calculateNCC(BufferedImage image, double[][] template, double tMean, double tVar, int startX, int startY) {
+    private static double calculateColorNCC(BufferedImage image, double[][] template, double tMean, double tVar, int startX, int startY, Color markerColor) {
         int size = template.length;
         if (tVar == 0) return 0.0;
         
@@ -270,8 +316,7 @@ public class ImageAnalyzer {
         for (int ty = 0; ty < size; ty++) {
             for (int tx = 0; tx < size; tx++) {
                 Color c = new Color(image.getRGB(startX + tx, startY + ty), true);
-                // Invert grayscale so dark pixels = high value (like the template where 1.0 = dark marker)
-                double intensity = 1.0 - (c.getRed() + c.getGreen() + c.getBlue()) / (3.0 * 255.0);
+                double intensity = colorDistance(c, markerColor) < 60.0 ? 1.0 : 0.0;
                 patchMean += intensity;
             }
         }
@@ -283,7 +328,7 @@ public class ImageAnalyzer {
         for (int ty = 0; ty < size; ty++) {
             for (int tx = 0; tx < size; tx++) {
                 Color c = new Color(image.getRGB(startX + tx, startY + ty), true);
-                double intensity = 1.0 - (c.getRed() + c.getGreen() + c.getBlue()) / (3.0 * 255.0);
+                double intensity = colorDistance(c, markerColor) < 60.0 ? 1.0 : 0.0;
                 
                 double tDiff = template[tx][ty] - tMean;
                 double pDiff = intensity - patchMean;
