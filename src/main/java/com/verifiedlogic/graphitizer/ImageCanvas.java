@@ -123,11 +123,33 @@ public class ImageCanvas extends JPanel {
         return roiBR;
     }
 
+    private java.awt.geom.Point2D.Double patchTL, patchBR;
+    private double[] patchDragStart;
+
+    public Rectangle getPatchBounds() {
+        if (patchTL == null || patchBR == null) return null;
+        int x = (int) Math.round(patchTL.x);
+        int y = (int) Math.round(patchTL.y);
+        int w = (int) Math.round(patchBR.x - patchTL.x);
+        int h = (int) Math.round(patchBR.y - patchTL.y);
+        if (w <= 2 || h <= 2) return null;
+        return new Rectangle(x, y, w, h);
+    }
+
     public void setDatasets(List<Dataset> datasets, Dataset activeDataset) {
         this.datasets = datasets;
         this.activeDataset = activeDataset;
         repaint();
     }
+
+    private double[] getZoomedImageCoordinates(int x, int y) {
+        return new double[]{
+            originX + (x - lockedScreenCenter.x) / 10.0,
+            originY + (y - lockedScreenCenter.y) / 10.0
+        };
+    }
+
+    private int magnifierRadius = 150;
 
     private Point lockedScreenCenter = new Point();
     private double originX = 0, originY = 0;
@@ -218,6 +240,8 @@ public class ImageCanvas extends JPanel {
                                     return;
                                 }
                                 state = State.ZOOMED_IN;
+                                patchTL = null; // Clear old patch when starting a new zoom session
+                                patchBR = null;
                                 break;
                             case PICK_X1:
                                 state = State.ZOOMED_X1;
@@ -255,32 +279,37 @@ public class ImageCanvas extends JPanel {
                     cancelZoom();
                     return;
                 } else if (isZoomed() && e.getButton() == MouseEvent.BUTTON1) {
-                    double finalX = originX + (e.getPoint().x - lockedScreenCenter.x) / 10.0;
-                    double finalY = originY + (e.getPoint().y - lockedScreenCenter.y) / 10.0;
-                    State oldState = state;
-                    state = State.IDLE;
-
-                    if (oldState == State.ZOOMED_IN) {
-                        if (activeDataset != null) {
-                            // Snapshot before adding a new point so the user can undo
-                            fireUndoSnapshot();
-                            activeDataset.getPoints().add(new java.awt.geom.Point2D.Double(finalX, finalY));
-                        }
-                        if (ImageCanvas.this.listener != null)
-                            ImageCanvas.this.listener.onPointAdded(finalX, finalY);
-                    } else if (oldState == State.EDIT_ZOOMED_IN) {
-                        if (activeDataset != null) {
-                            // Snapshot before moving a point so the user can undo
-                            fireUndoSnapshot();
-                            activeDataset.getPoints().get(editingIndex).setLocation(finalX, finalY);
-                        }
-                        if (ImageCanvas.this.listener != null)
-                            ImageCanvas.this.listener.onPointEdited(editingIndex, finalX, finalY);
+                    if (state == State.ZOOMED_IN) {
+                        patchDragStart = getZoomedImageCoordinates(e.getX(), e.getY());
+                        // Don't clear patchTL and patchBR here so they persist if the user just clicks
                     } else {
-                        if (ImageCanvas.this.listener != null)
-                            ImageCanvas.this.listener.onPointSelected(oldState, finalX, finalY);
+                        double finalX = originX + (e.getPoint().x - lockedScreenCenter.x) / 10.0;
+                        double finalY = originY + (e.getPoint().y - lockedScreenCenter.y) / 10.0;
+                        State oldState = state;
+                        state = State.IDLE;
+
+                        if (oldState == State.ZOOMED_IN) {
+                            if (activeDataset != null) {
+                                // Snapshot before adding a new point so the user can undo
+                                fireUndoSnapshot();
+                                activeDataset.getPoints().add(new java.awt.geom.Point2D.Double(finalX, finalY));
+                            }
+                            if (ImageCanvas.this.listener != null)
+                                ImageCanvas.this.listener.onPointAdded(finalX, finalY);
+                        } else if (oldState == State.EDIT_ZOOMED_IN) {
+                            if (activeDataset != null) {
+                                // Snapshot before moving a point so the user can undo
+                                fireUndoSnapshot();
+                                activeDataset.getPoints().get(editingIndex).setLocation(finalX, finalY);
+                            }
+                            if (ImageCanvas.this.listener != null)
+                                ImageCanvas.this.listener.onPointEdited(editingIndex, finalX, finalY);
+                        } else {
+                            if (ImageCanvas.this.listener != null)
+                                ImageCanvas.this.listener.onPointSelected(oldState, finalX, finalY);
+                        }
+                        repaint();
                     }
-                    repaint();
                 }
             }
 
@@ -394,6 +423,18 @@ public class ImageCanvas extends JPanel {
                     repaint();
                     return;
                 }
+                
+                if (state == State.ZOOMED_IN && patchDragStart != null) {
+                    double[] coords = getZoomedImageCoordinates(e.getX(), e.getY());
+                    patchTL = new java.awt.geom.Point2D.Double(
+                            Math.min(patchDragStart[0], coords[0]),
+                            Math.min(patchDragStart[1], coords[1]));
+                    patchBR = new java.awt.geom.Point2D.Double(
+                            Math.max(patchDragStart[0], coords[0]),
+                            Math.max(patchDragStart[1], coords[1]));
+                    repaint();
+                    return;
+                }
 
                 if (isZoomed()) {
                     mousePos = e.getPoint();
@@ -420,6 +461,36 @@ public class ImageCanvas extends JPanel {
                     if (ImageCanvas.this.listener != null) {
                         ImageCanvas.this.listener.onRoiUpdated();
                     }
+                } else if (isZoomed()) {
+                    if (state == State.ZOOMED_IN) {
+                        if (patchDragStart != null) {
+                            double[] releaseCoords = getZoomedImageCoordinates(e.getX(), e.getY());
+                            double dragDist = Math.hypot(releaseCoords[0] - patchDragStart[0], releaseCoords[1] - patchDragStart[1]);
+
+                            if (dragDist > 2.0) {
+                                // They dragged a box! Just finalize the drag, don't drop a point or close.
+                                patchDragStart = null;
+                                repaint();
+                            } else {
+                                // They just clicked! Drop the point, close the magnifier.
+                                double addedX = releaseCoords[0];
+                                double addedY = releaseCoords[1];
+                                
+                                if (activeDataset != null) {
+                                    fireUndoSnapshot();
+                                    activeDataset.getPoints().add(new java.awt.geom.Point2D.Double(addedX, addedY));
+                                }
+                                if (ImageCanvas.this.listener != null) {
+                                    ImageCanvas.this.listener.onPointAdded(addedX, addedY);
+                                }
+                                
+                                patchDragStart = null;
+                                // DO NOT clear patchTL and patchBR here! They are needed by getPatchBounds()!
+                                state = State.IDLE;
+                                repaint();
+                            }
+                        }
+                    } else if (state == State.EDIT_ZOOMED_IN) {}
                 }
             }
         };
@@ -469,6 +540,11 @@ public class ImageCanvas extends JPanel {
                     SwingUtilities.invokeLater(() -> viewport.setViewPosition(newViewPos));
                 }
 
+                repaint();
+            } else if (isZoomed()) {
+                magnifierRadius -= e.getPreciseWheelRotation() * 10;
+                if (magnifierRadius < 50) magnifierRadius = 50;
+                if (magnifierRadius > 400) magnifierRadius = 400;
                 repaint();
             }
         });
@@ -699,28 +775,14 @@ public class ImageCanvas extends JPanel {
                 "Welcome to Graphitizer!",
                 "",
                 "1. Load Image: Use 'Open Image' or 'Paste from Clipboard' to load a graph.",
-                "2. Plot Area Setup:",
-                "    - 'Keystone Correction' to flatten skewed photos, or",
-                "    - 'Rectangular ROI' to constrain the tracing area, or",
-                "    - 'Raw Pixel Coordinates' to add points in pixel coordinates.",
+                "2. Plot Area Setup: Use 'Keystone Correction' or 'Rectangular ROI' if needed.",
                 "3. Calibration: Set your Real Coordinates on the left, then use the 'Set' buttons.",
-                "    - Two-click method: 1. Click near a point. A magnifier appears. 2. Click again", 
-                "      to select the point with precision.",
                 "4. Selecting Data: Two-Click the image to add points to the active curve.",
-                "    - Click an existing point to remove it, then put it in the right place.",
-                "      Press ESC or right-click to abort.",
-                "    - Hover over a point and press DEL/Backspace or right-click a point to delete it.",
-                "    - Use Ctrl + Mouse Wheel to zoom into or out of the image.",
-                "5. Point Mode/Line Mode: After adding the first point, use 'Find Similar Points' or",
-                "    'Trace This Line' in the top toolbar for automated point selection.",
-                "    Use the sliders to change the tolerance (Point Mode) or spacing (Line Mode).",
-                "6. Multiple Curves: Click the '+' button to add curves (and inherit or set new",
-                "    calibrations).",
-                "7. Export: Your data is recorded on the right. Copy or Save as CSV when done.",
-                "    - Use the 'Sort Data' dropdown to automatically order points by X or Y.",
-                "    - Select rows of data and Clear/Copy/Paste will only affects those. ctrl + A",
-                "      selects all.",
-                "    - Undo and Redo (ctrl + Z and ctrl + Y)",
+                "5. Export: Your data is recorded on the right. Copy or Save as CSV when done.",
+                "",
+                "Please click the Help button at the top for detailed instructions on the",
+                "Two-Click method, drawing patch bounding boxes, Zooming, Automated tracing",
+                "(Point/Line mode), Keyboard Shortcuts, Undo/Redo, and Multiple curves.",
                 "",
                 "Authors: Gemini 3.1 and Willy Langeveld.",
                 "Distributed under the GNU General Public License. See Help for details."
@@ -754,7 +816,7 @@ public class ImageCanvas extends JPanel {
 
         Graphics2D g2 = (Graphics2D) g;
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
 
         int iw = image.getWidth();
         int ih = image.getHeight();
@@ -884,12 +946,14 @@ public class ImageCanvas extends JPanel {
             g2.setStroke(oldStroke);
         }
 
+        // (Patch bounds drawing on main canvas removed per user request)
+
         // Draw magnifier
         if (isZoomed()) {
             Graphics2D gMag = (Graphics2D) g2.create();
 
-            Ellipse2D.Double clip = new Ellipse2D.Double(lockedScreenCenter.x - 100, lockedScreenCenter.y - 100, 200,
-                    200);
+            Ellipse2D.Double clip = new Ellipse2D.Double(lockedScreenCenter.x - magnifierRadius, lockedScreenCenter.y - magnifierRadius, magnifierRadius * 2,
+                    magnifierRadius * 2);
 
             // Draw background for magnifier in case image has alpha
             gMag.setClip(clip);
@@ -941,16 +1005,34 @@ public class ImageCanvas extends JPanel {
             g2.setColor(Color.WHITE);
             g2.draw(clip);
             g2.setColor(Color.BLACK);
-            g2.draw(new Ellipse2D.Double(lockedScreenCenter.x - 101, lockedScreenCenter.y - 101, 202, 202));
+            g2.draw(new Ellipse2D.Double(lockedScreenCenter.x - magnifierRadius - 1, lockedScreenCenter.y - magnifierRadius - 1, magnifierRadius * 2 + 2, magnifierRadius * 2 + 2));
+
+            if (patchTL != null && patchBR != null) {
+                int magPx = (int) Math.round(lockedScreenCenter.x + (patchTL.x - originX) * zoom);
+                int magPy = (int) Math.round(lockedScreenCenter.y + (patchTL.y - originY) * zoom);
+                int magW = (int) Math.round((patchBR.x - patchTL.x) * zoom);
+                int magH = (int) Math.round((patchBR.y - patchTL.y) * zoom);
+                
+                Graphics2D gMagClip = (Graphics2D) g2.create();
+                gMagClip.setClip(clip);
+                Stroke oldStroke = gMagClip.getStroke();
+                gMagClip.setStroke(new BasicStroke(2.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f, new float[]{5.0f, 5.0f}, 0.0f));
+                gMagClip.setColor(Color.WHITE);
+                gMagClip.drawRect(magPx, magPy, magW, magH);
+                gMagClip.setStroke(new BasicStroke(2.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f, new float[]{5.0f, 5.0f}, 5.0f));
+                gMagClip.setColor(Color.BLACK);
+                gMagClip.drawRect(magPx, magPy, magW, magH);
+                gMagClip.dispose();
+            }
 
             // Draw crosshair bounded by circle
             double dist = Math.hypot(mousePos.x - lockedScreenCenter.x, mousePos.y - lockedScreenCenter.y);
             int crossX = mousePos.x;
             int crossY = mousePos.y;
 
-            if (dist > 100) {
-                crossX = (int) (lockedScreenCenter.x + (mousePos.x - lockedScreenCenter.x) * 100 / dist);
-                crossY = (int) (lockedScreenCenter.y + (mousePos.y - lockedScreenCenter.y) * 100 / dist);
+            if (dist > magnifierRadius) {
+                crossX = (int) (lockedScreenCenter.x + (mousePos.x - lockedScreenCenter.x) * magnifierRadius / dist);
+                crossY = (int) (lockedScreenCenter.y + (mousePos.y - lockedScreenCenter.y) * magnifierRadius / dist);
             }
 
             g2.setColor(Color.RED);

@@ -65,7 +65,8 @@ public class GraphitizerApp extends JFrame {
     private JComboBox<String> modeCombo;
     private JComboBox<String> sortCombo;
     private JComboBox<String> plotAreaCombo;
-    private JComboBox<String> markerShapeCombo;
+    private String previousPlotAreaMode = "None (Flat Image)";
+    private String modeBeforeKeystone = "None (Flat Image)";
 
     // Keystone Buttons
     private JButton btnTL, btnTR, btnBR, btnBL, btnApplyKeystone, btnSaveCorrectedImage;
@@ -138,25 +139,20 @@ public class GraphitizerApp extends JFrame {
         btnFindSimilar = new JButton("Find Similar Points");
         styleButton(btnFindSimilar);
         btnFindSimilar.setVisible(false);
-
-        markerShapeCombo = new JComboBox<>(new String[] { "Auto (Flood-Fill)", "Hollow Circle", "Solid Dot" });
-        markerShapeCombo.setVisible(false);
-        markerShapeCombo.setMaximumSize(new java.awt.Dimension(150, 30));
-        markerShapeCombo.setToolTipText("Select the marker shape. Use specific shapes for noisy graphs.");
-
-        lblAccuracy = new JLabel(" Tolerance: ");
+        plotAreaCombo = new JComboBox<>(new String[] { "None (Flat Image)", "Rectangular ROI", "Keystone Correction", "Raw Pixel Coordinates" });
+        plotAreaCombo.setPreferredSize(new Dimension(150, 30)); lblAccuracy = new JLabel(" Tolerance: ");
         lblAccuracy.setVisible(false);
-        accuracySlider = new JSlider(5, 100, 30);
+        accuracySlider = new JSlider(5, 100, 50);
         accuracySlider.setVisible(false);
         accuracySlider.setPreferredSize(new java.awt.Dimension(120, 25));
         accuracySlider.setFocusable(false); // Suppress the dotted focus border
         accuracySlider.setToolTipText("Adjust template matching tolerance (higher = looser match)");
-        // Live readout: shows current tolerance in ΔE (Euclidean color-distance) units
-        lblAccuracyValue = new JLabel("  " + accuracySlider.getValue() + " ΔE  ");
+        // Live readout: shows current tolerance
+        lblAccuracyValue = new JLabel("  " + accuracySlider.getValue() + "  ");
         lblAccuracyValue.setFont(lblAccuracyValue.getFont().deriveFont(java.awt.Font.ITALIC));
         lblAccuracyValue.setForeground(new Color(80, 80, 80));
         lblAccuracyValue.setVisible(false);
-        accuracySlider.addChangeListener(e -> lblAccuracyValue.setText("  " + accuracySlider.getValue() + " ΔE  "));
+        accuracySlider.addChangeListener(e -> lblAccuracyValue.setText("  " + accuracySlider.getValue() + "  "));
 
         btnTraceLine = new JButton("Trace This Line");
         styleButton(btnTraceLine);
@@ -211,8 +207,6 @@ public class GraphitizerApp extends JFrame {
         toolBar.add(saveAsBtn);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(btnFindSimilar);
-        toolBar.add(Box.createHorizontalStrut(5));
-        toolBar.add(markerShapeCombo);
         toolBar.add(Box.createHorizontalStrut(5));
         toolBar.add(lblAccuracy);
         toolBar.add(accuracySlider);
@@ -324,7 +318,6 @@ public class GraphitizerApp extends JFrame {
         plotAreaPanel.setBorder(BorderFactory.createTitledBorder("Plot Area Setup"));
 
         JPanel comboPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        plotAreaCombo = new JComboBox<>(new String[] { "None (Flat Image)", "Rectangular ROI", "Keystone Correction", "Raw Pixel Coordinates" });
         styleComboBox(plotAreaCombo);
         comboPanel.add(new JLabel("Mode:"));
         comboPanel.add(plotAreaCombo);
@@ -381,9 +374,42 @@ public class GraphitizerApp extends JFrame {
         roiPanel.setVisible(false);
 
         plotAreaCombo.addActionListener(e -> {
-            boolean isKeystone = "Keystone Correction".equals(plotAreaCombo.getSelectedItem());
-            boolean isRoi = "Rectangular ROI".equals(plotAreaCombo.getSelectedItem());
-            boolean isRawPixels = "Raw Pixel Coordinates".equals(plotAreaCombo.getSelectedItem());
+            String mode = (String) plotAreaCombo.getSelectedItem();
+            if (mode == null || mode.equals(previousPlotAreaMode)) return;
+
+            boolean isKeystone = mode.equals("Keystone Correction");
+            boolean isRoi = mode.equals("Rectangular ROI");
+            boolean isRawPixels = mode.equals("Raw Pixel Coordinates");
+
+            boolean wasKeystone = previousPlotAreaMode.equals("Keystone Correction");
+            boolean wasRawPixels = previousPlotAreaMode.equals("Raw Pixel Coordinates");
+            
+            if (isKeystone && !wasKeystone) {
+                modeBeforeKeystone = previousPlotAreaMode;
+            }
+
+            boolean shouldInvalidate = isKeystone || wasKeystone || isRawPixels || wasRawPixels;
+            previousPlotAreaMode = mode;
+
+            // Invalidate calibration when changing to/from modes with fundamentally different geometry
+            if (shouldInvalidate && activeDataset != null) {
+                activeDataset.setPixX1(null);
+                activeDataset.setPixX2(null);
+                activeDataset.setPixY1(null);
+                activeDataset.setPixY2(null);
+                
+                txtPixX1.setText("");
+                txtPixX2.setText("");
+                txtPixY1.setText("");
+                txtPixY2.setText("");
+                
+                btnX1.setText("Set X1");
+                btnX2.setText("Set X2");
+                btnY1.setText("Set Y1");
+                btnY2.setText("Set Y2");
+                
+                checkCalibration();
+            }
 
             keystoneGrid.setVisible(isKeystone);
             applyWarpPanel.setVisible(isKeystone);
@@ -860,15 +886,12 @@ public class GraphitizerApp extends JFrame {
 
                 for (Dataset ds : datasets) {
                     ds.getPoints().clear();
-                    ds.setPixX1(null);
-                    ds.setPixX2(null);
-                    ds.setPixY1(null);
-                    ds.setPixY2(null);
+                    ds.setPixX1(null); ds.setPixX2(null); ds.setPixY1(null); ds.setPixY2(null);
                 }
-                txtPixX1.setText("Not Set");
-                txtPixX2.setText("Not Set");
-                txtPixY1.setText("Not Set");
-                txtPixY2.setText("Not Set");
+                txtPixX1.setText(""); txtPixX2.setText(""); txtPixY1.setText(""); txtPixY2.setText("");
+                
+                // Drop out of Keystone mode now that we've applied the warp
+                plotAreaCombo.setSelectedItem(modeBeforeKeystone);
 
                 refreshTable();
                 checkWizardState();
@@ -1275,8 +1298,6 @@ public class GraphitizerApp extends JFrame {
 
         if (btnFindSimilar != null && btnTraceLine != null) {
             btnFindSimilar.setVisible(shouldShow && !isLineMode);
-            markerShapeCombo.setVisible(shouldShow && !isLineMode);
-            lblAccuracy.setVisible(shouldShow && !isLineMode);
             accuracySlider.setVisible(shouldShow && !isLineMode);
             lblAccuracyValue.setVisible(shouldShow && !isLineMode);
 
@@ -1823,7 +1844,7 @@ public class GraphitizerApp extends JFrame {
         }
 
         java.awt.geom.Point2D.Double lastPoint = activeDataset.getPoints().get(activeDataset.getPoints().size() - 1);
-        Point refPixel = new Point((int) Math.round(lastPoint.x), (int) Math.round(lastPoint.y));
+        java.awt.geom.Point2D.Double refPixel = lastPoint;
 
         // Default to the full image bounds so curves extending outside the calibrated axis grid aren't arbitrarily truncated.
         Rectangle bounds = new Rectangle(0, 0, loadedImage.getWidth(), loadedImage.getHeight());
@@ -1847,16 +1868,19 @@ public class GraphitizerApp extends JFrame {
         }
 
         btnFindSimilar.setEnabled(false);
-        markerShapeCombo.setEnabled(false);
         accuracySlider.setEnabled(false);
         final Rectangle searchArea = bounds;
         final double matchThreshold = (double) accuracySlider.getValue();
-        final String markerShape = (String) markerShapeCombo.getSelectedItem();
+        final Rectangle patchBounds = imageCanvas.getPatchBounds();
 
         javax.swing.SwingWorker<List<java.awt.geom.Point2D.Double>, Void> worker = new javax.swing.SwingWorker<>() {
             @Override
             protected List<java.awt.geom.Point2D.Double> doInBackground() throws Exception {
-                return ImageAnalyzer.findSimilarPoints(loadedImage, refPixel, searchArea, matchThreshold, markerShape);
+                if (patchBounds != null) {
+                    return ImageAnalyzer.findSimilarPatches(loadedImage, patchBounds, searchArea, matchThreshold, refPixel);
+                } else {
+                    return ImageAnalyzer.findSimilarPoints(loadedImage, refPixel, searchArea, matchThreshold, "Auto (Flood-Fill)");
+                }
             }
 
             @Override
@@ -1867,8 +1891,15 @@ public class GraphitizerApp extends JFrame {
                         // Snapshot before bulk-adding auto-found points so Undo works
                         pushUndo(activeDataset);
                         for (java.awt.geom.Point2D.Double p : results) {
-                            // Don't re-add the exact same template source center
-                            if (p.distanceSq(refPixel) > 25.0) {
+                            // Don't re-add if we already have a point very close to this
+                            boolean isDuplicate = false;
+                            for (java.awt.geom.Point2D.Double existing : activeDataset.getPoints()) {
+                                if (p.distanceSq(existing) < 25.0) {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+                            if (!isDuplicate) {
                                 activeDataset.getPoints().add(new java.awt.geom.Point2D.Double(p.x, p.y));
                                 recordDataPoint(p.x, p.y, -1);
                             }
@@ -1887,7 +1918,6 @@ public class GraphitizerApp extends JFrame {
                     JOptionPane.showMessageDialog(GraphitizerApp.this, "Error scanning for points: " + ex.getMessage());
                 } finally {
                     btnFindSimilar.setEnabled(true);
-                    markerShapeCombo.setEnabled(true);
                     accuracySlider.setEnabled(true);
                 }
             }
@@ -2096,7 +2126,7 @@ public class GraphitizerApp extends JFrame {
 */
                 String helpHtml = "<html><body style='font-family: SansSerif; font-size: 13px;'>" +
                 "<h2 style='color: #2c3e50;'>Graphitizer Usage Guide</h2>" +
-                "<p>Welcome to Graphitizer! This tool extracts data points from graph and plot images.</p>" +
+                "<p>Welcome to Graphitizer! This tool extracts data points from graph and plot images. <b>Please click the Help button above for detailed instructions.</b></p>" +
                 "<ul>" +
                 "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Open Image / Paste from Clipboard</b>: Load a new image from disk or paste directly from the clipboard.</li>" +
                 "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Plot Area Setup</b>: Set up the plot area:" +
@@ -2107,7 +2137,13 @@ public class GraphitizerApp extends JFrame {
                 "    <li><i>Raw Pixel Coordinates</i>: Bypasses axis calibration entirely to emit raw X/Y pixel coordinates.</li>" +
                 "  </ul>" +
                 "</li>" +
-                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Two-Click Method:</b> 1. Click near a point -> a magnifier appears. 2. Click again to select the point with precision.</li>" +
+                "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Two-Click Method:</b>" +
+                "  <ol style='margin-top: 2px; margin-bottom: 2px;'>" +
+                "    <li>Click near a point &rarr; a magnifier appears.</li>" +
+                "    <li>Click again to select the point with precision.</li>" +
+                "  </ol>" +
+                "  <div style='margin-top: 5px;'><b>Tip:</b> You can scroll your mouse wheel while the magnifier is visible to resize it!</div>" +
+                "</li>" +
                 "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Axis Calibration</b>: Set real-world coordinates for the X and Y axes, then click <b>Set X1, X2, Y1</b>, or <b>Y2</b> and two-click the corresponding calibration point in the image. Do this for all four calibration points.</li>" +
                 "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Selecting Points</b>: Two-Click the image to add points to the active curve." +
                 "  <ul>" +
@@ -2118,7 +2154,9 @@ public class GraphitizerApp extends JFrame {
                 "</li>" +
                 "<li style='margin-bottom: 5px;'><b style='color: #2980b9;'>Modes</b>:" +
                 "  <ul>" +
-                "    <li><i>Point Mode</i>: Add one or more points manually. Once a point is added, the <b>Find Similar Points</b> button and <b>Tolerance</b> slider appear at the top to automatically map matching markers across the image.</li>" +
+                "    <li style='margin-bottom: 5px;'><i>Point Mode</i>: Add one or more points manually. Once a point is added, the <b>Find Similar Points</b> button and <b>Tolerance</b> slider appear at the top to automatically map matching markers across the image." +
+                "      <div style='margin-top: 5px;'><b>Tip:</b> When using the magnifier, you can click and drag to draw a bounding box precisely around a marker. The magnifier will stay open so you can click the exact center of the marker to finalize the template! Or, you can simply click without dragging to let the system automatically detect the marker boundary using flood-fill.</div>" +
+                "    </li>" +
                 "    <li><i>Line Mode</i>: Add one or more points manually. Once a point is added, the <b>Trace This Line</b> button and <b>Step Size</b> slider appear at the top to automatically add points to the current dataset by tracing continuous line segments, with the slider setting the pixel distance between each point.</li>" +
                 "    <li><i>Manual Sort</i>: Points are sorted in the order they were added.</li>" +
                 "    <li><i>Auto-Sort X/Y</i>: Automatically sort points by X or Y value.</li>" +

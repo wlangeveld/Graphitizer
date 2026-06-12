@@ -16,12 +16,12 @@ Write-Host "Converting icon.png to icon.ico using Java..." -ForegroundColor Cyan
 & "$env:JAVA_HOME\bin\java.exe" IconConverter "src\main\resources\icon.png" "src\main\resources\icon.ico"
 
 Write-Host "Cleaning previous release output..." -ForegroundColor Cyan
-if (Test-Path "release") {
-    Remove-Item -Recurse -Force "release"
+if (Test-Path "release\Graphitizer 1.3") {
+    Remove-Item -Recurse -Force "release\Graphitizer 1.3"
 }
 
 Write-Host "Building native executable with jpackage..." -ForegroundColor Cyan
-jpackage --type app-image --name "Graphitizer 1.2" --input target --main-jar graphitizer-1.2-SNAPSHOT.jar --dest release --icon src/main/resources/icon.ico
+jpackage --type app-image --name "Graphitizer 1.3" --input target --main-jar graphitizer-1.3-SNAPSHOT.jar --dest release --icon src/main/resources/icon.ico
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "jpackage build failed!" -ForegroundColor Red
