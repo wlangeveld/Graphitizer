@@ -6,6 +6,9 @@
 *   **Intelligent Overwrite Protections:** A new dialog prompts for confirmation before attempting to overwrite an existing picture.
 *   **DefaultSaveDir Integration:** The image exporter intuitively reads and writes to your internal `settings.txt` registry to keep track of your default save location, seamlessly matching the data export mechanics.
 *   **Non-Destructive Keystone Aborts:** Hitting `Escape` or `Right-Clicking` to cancel out of a zoomed-in keystone placement no longer fully resets the keystone automation state. It now cancels the active magnification and drops you right back to the previous picking state to try again without losing sequence progress!
+*   **Template Patch Matching (NCC):** Replaced the old color-flood marker matching with a blazing-fast Normalized Cross-Correlation (NCC) template matching engine. Drag a bounding box around any marker to use it as a custom matching template, or single-click a point to let the flood-fill engine automatically detect the marker's boundaries and generate a template for you!
+*   **Sub-Pixel Matching Accuracy:** The NCC matching engine perfectly preserves the precise floating-point coordinates of your template "hotspot" click, guaranteeing sub-pixel accuracy across all generated matches without rounding errors.
+*   **Crisp Image Scaling:** Fixed an issue where the main image canvas would appear blurred while zooming out. Both the main canvas and the magnifier now enforce nearest-neighbor interpolation to preserve sharp, readable pixel edges at all zoom levels.
 
 ---
 
